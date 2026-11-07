@@ -128,7 +128,7 @@ class CatalogTests(unittest.TestCase):
         second=self.add_key('kimi-api','个人','sk-PRIVATE-TWO-123456','中国站')[1]['id']
         data={'kimi-api@'+first:{'balance':10.0,'cash':-1.0,'voucher':11.0,'currency':'CNY','_fetchedAt':self.m.time.time()},'kimi-api@'+second:{'balance':2.5,'currency':'CNY','_fetchedAt':self.m.time.time()}}
         row=self.entry('Kimi API',data)
-        self.assertEqual(row['value'],'余额 ¥12.50')
+        self.assertEqual(row['value'],'余额 工作 ¥10.00 · 个人 ¥2.50')  # Kimi tells no account: listed, not summed.
         keys={c['label']:c for c in row['children'] if c.get('children')}
         self.assertEqual({k:v['value'] for k,v in keys.items()},{'工作':'余额 ¥10.00','个人':'余额 ¥2.50'})
         self.assertEqual([(c['label'],c.get('value')) for c in keys['工作']['children'] if c['label'] in ('现金','代金券')],[('现金','¥-1.00'),('代金券','¥11.00')])
@@ -159,11 +159,15 @@ class CatalogTests(unittest.TestCase):
         with patch.dict(os.environ,{'QODER_CN_API_KEY':'sk-PRIVATE-ENV-1234567890','QODER_CN_ORG_ID':'org2'}):
             data['qoder-api']={'balance':40.0,'currency':'Credits','_fetchedAt':now}
             self.assertEqual(self.entry('Qoder CN API',data)['value'],'余额 130 Credits')  # The default key names org2 too.
-        # Kimi tells no account: identical readings are one account, different ones are summed.
+        # Kimi tells no account. One account read a moment apart, or two accounts that happen to agree, look
+        # alike, so keys are neither summed nor merged by their readings; a lone figure is still the total.
         x,y=keys('kimi-api',{'region':'china'},{'region':'china'})
-        same={'balance':10.0,'cash':-1.0,'voucher':11.0,'currency':'CNY','_fetchedAt':now}
-        self.assertEqual(self.entry('Kimi API',{'kimi-api@'+x:same,'kimi-api@'+y:dict(same)})['value'],'余额 ¥10.00')
-        self.assertEqual(self.entry('Kimi API',{'kimi-api@'+x:same,'kimi-api@'+y:dict(same,cash=-2.0)})['value'],'余额 ¥20.00')
+        same={'balance':100.0,'currency':'CNY','_fetchedAt':now}
+        self.assertEqual(self.entry('Kimi API',{'kimi-api@'+x:same,'kimi-api@'+y:dict(same,balance=99.99)})['value'],'余额 K0 ¥100.00 · K1 ¥99.99')
+        row=self.entry('Kimi API',{'kimi-api@'+x:same,'kimi-api@'+y:dict(same)})
+        self.assertEqual(row['value'],'余额 K0 ¥100.00 · K1 ¥100.00')
+        self.assertFalse(any(k.get('detail') for k in row['children'] if k.get('children')))
+        self.assertEqual(self.entry('Kimi API',{'kimi-api@'+x:same})['value'],'余额 ¥100.00')
     def test_classic_key_file_stays_the_default_and_user_files_are_never_deleted(self):
         legacy=Path(self.m.STATE_DIR)/'keys'/'openai_api_key.key';legacy.parent.mkdir(parents=True);legacy.write_text('sk-OLD-TYPED-COPY')
         chosen=self.root/'my-openai-key';chosen.write_text('sk-USER-OWNED-FILE')

@@ -133,17 +133,19 @@ class PluginAlertTests(unittest.TestCase):
             self.assertEqual(sent,['MiniMax 订阅 · W1','MiniMax 订阅 · W5','MiniMax 订阅 · W6'])
             del sent[:];self.m.check_usage_alerts()
             self.assertEqual(sent,[])
-    def test_balance_alert_is_set_per_api_and_counts_each_account_once(self):
+    def test_balance_alert_is_set_per_api_and_each_key_of_unknown_account_alone(self):
         self.enable('kimi-api')
         ids=[]
         for n in range(2):
             self.m.keystore.add(self.m.STATE_DIR,'kimi-api','K%d'%n,'sk-PRIVATE-%d-1234567890'%n,{'region':'china'});ids.append(self.m.keystore.entries(self.m.STATE_DIR,'kimi-api')[-1]['id'])
         with patch.object(self.m,'text_dialog',return_value='¥20'):self.m.run_action('set-balance-alert',['kimi-api'])
         self.assertEqual(preferences.read(self.m.STATE_DIR)['balanceAlerts'],{'kimi-api':20.0})
+        # Kimi tells no account, so two keys reading the same balance may still be two accounts.
         same={'balance':8.0,'currency':'CNY','_fetchedAt':self.now}
         rows=self.m.alert_balances({'kimi-api@'+ids[0]:same,'kimi-api@'+ids[1]:dict(same)})
-        self.assertEqual([(r['name'],r['amount'],r['line'],r['current']) for r in rows],[('Kimi API',8.0,20.0,True)])
-        self.assertEqual(self.m.alert_notice(dict(rows[0],kind='balance')),('余额提醒','Kimi API 余额 ¥8.00，已低于提醒线 ¥20.00'))
+        self.assertEqual([(r['name'],r['amount'],r['line'],r['current']) for r in rows],[('Kimi API · K0',8.0,20.0,True),('Kimi API · K1',8.0,20.0,True)])
+        self.assertEqual(len({r['id'] for r in rows}),2)
+        self.assertEqual(self.m.alert_notice(dict(rows[0],kind='balance')),('余额提醒','Kimi API · K0 余额 ¥8.00，已低于提醒线 ¥20.00'))
         row=next(r for r in self.m.panel_entries(self.m.api_lines('kimi-api',{}))[0]['children'] if r['label']=='余额提醒…')
         self.assertEqual(row['value'],'低于 ¥20.00')
         with patch.object(self.m,'text_dialog',return_value=''):self.m.run_action('set-balance-alert',['kimi-api'])

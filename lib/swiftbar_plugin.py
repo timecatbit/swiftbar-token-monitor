@@ -1862,9 +1862,7 @@ def alert_balances(data):
         if not module_enabled(provider):continue
         counted=counted_values([v for v in api_values(provider,data)[1] if v.get('kind')=='balance'])
         for v in counted:
-            # A key read as its own account goes by its name: its reading changes with every spend.
-            owner=v['label'] if v['account'][0]=='reading' else v['account'][0]+':'+v['account'][1]
-            out.append({'id':provider+'|'+owner,'name':catalog.BY_KEY[provider].label+(' · '+v['label'] if len(counted)>1 else ''),
+            out.append({'id':provider+'|'+':'.join(v['account']),'name':catalog.BY_KEY[provider].label+(' · '+v['label'] if len(counted)>1 else ''),
                         'amount':v['amount'],'currency':v['currency'],'line':line,
                         'current':not v.get('failed') and time.time()-(v.get('at') or 0)<=FRESH_READING})
     return out
@@ -2736,15 +2734,13 @@ def key_value(provider,entry,data):
 ACCOUNT_OPTIONS={'qoder-api':('org','QODER_CN_ORG_ID'),'grok':('team','XAI_TEAM_ID')}
 
 
-def key_account(provider,entry,payload,value):
+def key_account(provider,entry):
     """Which account a key's figure belongs to, so keys of one account count once in the homepage total.
-    Qoder CN and Grok keys name their organization or team. DeepSeek, Kimi and Claude tell no account,
-    so keys whose readings agree to the cent are taken as one account."""
+    Qoder CN and Grok keys name their organization or team. DeepSeek, Kimi and Claude tell no account:
+    such a key is its own ('key', id), which may or may not be another key's account."""
     option,env=ACCOUNT_OPTIONS.get(provider,(None,None))
     owner=str((entry.get('options') or {}).get(option) or (os.environ.get(env,'') if env and entry['id']=='default' else '')).strip()
-    if owner:return (option,owner)
-    return ('reading',value.get('kind'),value.get('currency'))+tuple(round(v,2) if isinstance(v,(int,float)) else None
-                                                                    for v in (value.get('amount'),payload.get('cash'),payload.get('voucher'),payload.get('todayCost')))
+    return (option,owner) if owner else ('key',entry['id'])
 
 
 def counted_values(values):
@@ -2755,14 +2751,18 @@ def counted_values(values):
 
 
 def api_badge(values):
-    """Homepage total: balances or spend are summed per currency and account; otherwise the shared key state."""
+    """Homepage total: balances or spend are summed per currency and account; otherwise the shared key state.
+    Keys that tell no account may share one, so beside another figure they are listed by name, not summed."""
     if not values:return '未配置'
     for kind,prefix in (('balance','余额 '),('spend','本月已用 ')):
         rows=counted_values([v for v in values if v.get('kind')==kind])
-        if rows:
-            totals={}
-            for v in rows:totals[v['currency']]=totals.get(v['currency'],0)+v['amount']
-            return with_failure(prefix+' · '.join(money_text(a,c) for c,a in totals.items()),True,any(v.get('failed') for v in rows))
+        if not rows:continue
+        failed=any(v.get('failed') for v in rows)
+        if len(rows)>1 and any(v['account'][0]=='key' for v in rows):
+            return with_failure(prefix+' · '.join(v['label']+' '+money_text(v['amount'],v['currency']) for v in rows),True,failed)
+        totals={}
+        for v in rows:totals[v['currency']]=totals.get(v['currency'],0)+v['amount']
+        return with_failure(prefix+' · '.join(money_text(a,c) for c,a in totals.items()),True,failed)
     texts={v['text'] for v in values}
     return texts.pop() if len(texts)==1 else '%d 把 Key'%len(values)
 
@@ -2823,7 +2823,7 @@ def api_values(provider,data):
     keys=api_keys(provider);values=[key_value(provider,e,data) for e in keys]
     for entry,value in zip(keys,values):
         value['label']=entry['label']
-        if value.get('kind'):value['account']=key_account(provider,entry,data.get(entry['cache']) or {},value)
+        if value.get('kind'):value['account']=key_account(provider,entry)
     return keys,values
 
 
@@ -2841,9 +2841,8 @@ def api_lines(provider,data):
     rows=[item(service.label,badge=api_badge(values),**brand_icon(provider))]
     for entry,value in zip(keys,values):
         same=first.get(value.get('account'))
-        # The key reads an account an earlier key already counts; say so where the homepage total would surprise.
-        note=None if same in (None,entry) else ('与「%s」同一%s，主页合计只算一次'%(same['label'],{'org':'组织','team':'Team'}[value['account'][0]]) if value['account'][0]!='reading'
-                                                else '读数与「%s」相同，按同一账户只算一次'%same['label'])
+        # The key reads an organization or team an earlier key already counts; say so where the homepage total would surprise.
+        note=None if same in (None,entry) else '与「%s」同一%s，主页合计只算一次'%(same['label'],{'org':'组织','team':'Team'}[value['account'][0]])
         rows.append(item(entry['label'],level=1,badge=value['text'],paneldetail=note))
         rows.extend(key_lines(provider,entry,data,2))
     rows.append(item('添加 Key…',level=1,sfimage='plus',**act('add-api-key',provider)))

@@ -10,7 +10,7 @@ SwiftBar 菜单栏插件：在一个原生面板里查看各 AI 编程工具的 
 
 - **Harness 用量**：Claude 桌面 App、ChatGPT（Codex）、OpenCodex、OpenCode、DeepSeek Harness、WorkBuddy、Qoder CN、Gemini CLI。显示 Token、请求、缓存命中、模型分布和趋势图，并按模型官方价估算 API 等值费用；Qoder CN 套餐请求在本机只记 Credits、不记 Token，卡片按 Credits 显示。范围可选当天、近 24 小时、近 7/30 天、本周、本月或全部。
 - **订阅**：ChatGPT、Claude、MiniMax 显示已用百分比和重置时间，70% 起变橙、90% 起变红，侧栏还会写出比匀速多用还是少用；Qoder CN 读取 Qoder CN App 本机记录的 Credits 用量（在 App 右下角打开 Credits 用量时更新）；Gemini、Grok、Kimi 可以手动标记。
-- **API**：DeepSeek、Kimi、Grok 显示余额；Qoder CN 用组织 API Key（团队版/企业版）显示组织共享的加购 Credits 余额；Claude 显示本月花费（需要管理员 Key）；ChatGPT、Gemini 可以测试 Key 是否可用。每个 API 可以保存多把 Key，同一账户的多把 Key 在主页只算一次。
+- **API**：DeepSeek、Kimi、Grok 显示余额；Qoder CN 用组织 API Key（团队版/企业版）显示组织共享的加购 Credits 余额；Claude 显示本月花费（需要管理员 Key）；ChatGPT、Gemini 可以测试 Key 是否可用。每个 API 可以保存多把 Key，同一组织或 Team 的多把 Key 在主页只算一次；接口不告诉账户的 Key 逐把列出，不相加。
 - **提醒**：订阅窗口用到 90%（可改为 70%、80% 或关闭）时发通知；余额类 API 可以各自设置余额低于多少时提醒；可选在每周额度快重置却还没怎么用时提醒。
 - **Harness 更新**：已勾选客户端有新版本时提醒，Claude Code 和 Codex CLI 可一键在终端更新。
 - **其他**：Komari 服务器监控；分享按钮把当前用量生成一张图，可直接复制或发送。
