@@ -1903,8 +1903,10 @@ def check_usage_alerts():
     if not (settings['usageAlert'] or settings['resetReminder'] or settings['balanceAlerts']):return
     data=cached_data();marks=alerts.load(STATE_DIR)
     due=alerts.due(alert_windows(data),alert_balances(data),marks,settings['usageAlert'],settings['resetReminder'],time.time())
+    # Only a notice that went out is marked; one that failed, or past the few sent at once, is due again next run.
+    for alert in due[:alerts.AT_ONCE]:
+        if post_notice(*alert_notice(alert)):alerts.told(marks,alert)
     alerts.save(STATE_DIR,marks)
-    for alert in due[:5]:post_notice(*alert_notice(alert))
 
 
 def background_refresh():

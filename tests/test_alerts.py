@@ -21,50 +21,62 @@ def window(used,resets,span=WEEK,current=True,id='claude|本周'):
     return {'id':id,'name':'Claude 订阅','window':'本周','used':used,'resetsAt':resets,'span':span,'current':current}
 
 
+def due(windows,balances,marks,percent,reminder,now):
+    """What is due, each said at once."""
+    out=alerts.due(windows,balances,marks,percent,reminder,now)
+    for alert in out:alerts.told(marks,alert)
+    return out
+
+
 class RuleTests(unittest.TestCase):
     def test_a_window_is_told_once_per_run(self):
         now=1_800_000_000.0;marks={}
-        self.assertEqual([a['kind'] for a in alerts.due([window(91,now+DAY)],[],marks,90,False,now)],['usage'])
-        self.assertEqual(alerts.due([window(95,now+DAY)],[],marks,90,False,now+60),[])  # Same run, read again.
+        self.assertEqual([a['kind'] for a in due([window(91,now+DAY)],[],marks,90,False,now)],['usage'])
+        self.assertEqual(due([window(95,now+DAY)],[],marks,90,False,now+60),[])  # Same run, read again.
         # A Codex-style reset that drifts a little between readings is still the same run.
-        self.assertEqual(alerts.due([window(96,now+DAY+120)],[],marks,90,False,now+120),[])
+        self.assertEqual(due([window(96,now+DAY+120)],[],marks,90,False,now+120),[])
         # The reset has passed: the window's next run is told of again.
-        self.assertEqual(len(alerts.due([window(92,now+DAY+WEEK)],[],marks,90,False,now+DAY+700)),1)
+        self.assertEqual(len(due([window(92,now+DAY+WEEK)],[],marks,90,False,now+DAY+700)),1)
     def test_falling_under_the_line_rearms_and_off_says_nothing(self):
         now=1_800_000_000.0;marks={}
-        alerts.due([window(91,now+DAY)],[],marks,90,False,now)
-        alerts.due([window(50,now+DAY)],[],marks,90,False,now+60)
+        due([window(91,now+DAY)],[],marks,90,False,now)
+        due([window(50,now+DAY)],[],marks,90,False,now+60)
         self.assertNotIn('w|claude|本周',marks)
-        self.assertEqual(len(alerts.due([window(91,now+DAY)],[],marks,90,False,now+120)),1)
-        self.assertEqual(alerts.due([window(99,now+DAY,id='other')],[],{},0,False,now),[])
+        self.assertEqual(len(due([window(91,now+DAY)],[],marks,90,False,now+120)),1)
+        self.assertEqual(due([window(99,now+DAY,id='other')],[],{},0,False,now),[])
     def test_a_reading_that_failed_or_is_old_neither_alerts_nor_clears(self):
         now=1_800_000_000.0;marks={}
-        self.assertEqual(alerts.due([window(99,now+DAY,current=False)],[],marks,90,False,now),[])
-        alerts.due([window(91,now+DAY)],[],marks,90,False,now)
-        alerts.due([window(10,now+DAY,current=False)],[],marks,90,False,now+60)
+        self.assertEqual(due([window(99,now+DAY,current=False)],[],marks,90,False,now),[])
+        due([window(91,now+DAY)],[],marks,90,False,now)
+        due([window(10,now+DAY,current=False)],[],marks,90,False,now+60)
         self.assertIn('w|claude|本周',marks)
     def test_window_without_reset_is_one_run_until_it_falls_under(self):
         now=1_800_000_000.0;marks={}
-        self.assertEqual(len(alerts.due([window(91,None,None)],[],marks,90,False,now)),1)
-        self.assertEqual(alerts.due([window(99,None,None)],[],marks,90,False,now+WEEK),[])
+        self.assertEqual(len(due([window(91,None,None)],[],marks,90,False,now)),1)
+        self.assertEqual(due([window(99,None,None)],[],marks,90,False,now+WEEK),[])
     def test_reset_reminder_is_for_long_windows_left_mostly_unused(self):
         now=1_800_000_000.0;marks={}
         soon=now+6*3600
-        told=alerts.due([window(40,soon),window(40,soon,span=5*3600,id='claude|5h'),window(90,soon,id='hot'),window(40,now+2*DAY,id='later')],[],marks,0,True,now)
+        told=due([window(40,soon),window(40,soon,span=5*3600,id='claude|5h'),window(90,soon,id='hot'),window(40,now+2*DAY,id='later')],[],marks,0,True,now)
         self.assertEqual([(a['kind'],a['id']) for a in told],[('renews','claude|本周')])
-        self.assertEqual(alerts.due([window(41,soon)],[],marks,0,True,now+600),[])
-        self.assertEqual(alerts.due([window(40,soon,id='x')],[],{},0,False,now),[])  # Off by default.
+        self.assertEqual(due([window(41,soon)],[],marks,0,True,now+600),[])
+        self.assertEqual(due([window(40,soon,id='x')],[],{},0,False,now),[])  # Off by default.
     def test_a_balance_is_told_once_until_topped_up_past_the_line(self):
         now=1_800_000_000.0;marks={}
         low={'id':'deepseek|默认','name':'DeepSeek API','amount':8.0,'currency':'CNY','line':20.0,'current':True}
-        self.assertEqual([a['kind'] for a in alerts.due([],[low],marks,0,False,now)],['balance'])
-        self.assertEqual(alerts.due([],[dict(low,amount=5.0)],marks,0,False,now+60),[])
-        alerts.due([],[dict(low,amount=100.0)],marks,0,False,now+120)
-        self.assertEqual(len(alerts.due([],[dict(low,amount=19.0)],marks,0,False,now+180)),1)
-        self.assertEqual(alerts.due([],[dict(low,amount=1.0,current=False,id='x')],{},0,False,now),[])
+        self.assertEqual([a['kind'] for a in due([],[low],marks,0,False,now)],['balance'])
+        self.assertEqual(due([],[dict(low,amount=5.0)],marks,0,False,now+60),[])
+        due([],[dict(low,amount=100.0)],marks,0,False,now+120)
+        self.assertEqual(len(due([],[dict(low,amount=19.0)],marks,0,False,now+180)),1)
+        self.assertEqual(due([],[dict(low,amount=1.0,current=False,id='x')],{},0,False,now),[])
+    def test_an_alert_not_said_stays_due(self):
+        now=1_800_000_000.0;marks={}
+        self.assertEqual(len(alerts.due([window(91,now+DAY)],[],marks,90,False,now)),1)
+        self.assertEqual(marks,{})
+        self.assertEqual(len(alerts.due([window(91,now+DAY)],[],marks,90,False,now+60)),1)
     def test_marks_of_things_no_longer_read_are_dropped_after_a_while(self):
         now=1_800_000_000.0;marks={'w|gone':{'at':now-alerts.KEEP-1},'w|recent':{'at':now-60}}
-        alerts.due([],[],marks,90,False,now)
+        due([],[],marks,90,False,now)
         self.assertEqual(list(marks),['w|recent'])
     def test_marks_persist_privately(self):
         with tempfile.TemporaryDirectory() as state:
@@ -103,12 +115,24 @@ class PluginAlertTests(unittest.TestCase):
         data={'chatgpt':{'_fetchedAt':self.now,'windows':[{'name':'codex','minutes':10080,'remaining':5,'resetsAt':self.now+3600}]},'chatgpt_error':None}
         sent=[]
         with patch.object(self.m,'cached_data',return_value=data),patch.object(self.m,'chatgpt_source',return_value='client'), \
-             patch.object(self.m,'post_notice',side_effect=lambda *a:sent.append(a)):
+             patch.object(self.m,'post_notice',side_effect=lambda *a:sent.append(a) or True):
             self.m.check_usage_alerts();self.m.check_usage_alerts()
         self.assertEqual(len(sent),1);subtitle,body=sent[0]
         self.assertEqual(subtitle,'用量提醒')
         self.assertTrue(body.startswith('ChatGPT 订阅 · 本周 已用 95%，'));self.assertTrue(body.endswith(' 重置'))
         self.assertIn('w|chatgpt|本周',json.loads((Path(self.m.STATE_DIR)/'alerts.json').read_text())['marks'])
+    def test_only_notices_that_went_out_are_marked(self):
+        self.enable('minimax')
+        data={'minimax':{'_fetchedAt':self.now,'windows':[{'name':'W%d'%n,'remaining':5,'resetsAt':self.now+DAY} for n in range(7)]},'minimax_error':None}
+        sent=[];results=iter([True,False,True,True,True,True,True,True])  # The second notice fails to go out.
+        def post(subtitle,body):sent.append(body.split(' 已用')[0]);return next(results)
+        with patch.object(self.m,'cached_data',return_value=data),patch.object(self.m,'post_notice',side_effect=post):
+            self.m.check_usage_alerts()
+            self.assertEqual(sent,['MiniMax 订阅 · W%d'%n for n in range(5)])  # Five at once.
+            del sent[:];self.m.check_usage_alerts()
+            self.assertEqual(sent,['MiniMax 订阅 · W1','MiniMax 订阅 · W5','MiniMax 订阅 · W6'])
+            del sent[:];self.m.check_usage_alerts()
+            self.assertEqual(sent,[])
     def test_balance_alert_is_set_per_api_and_counts_each_account_once(self):
         self.enable('kimi-api')
         ids=[]

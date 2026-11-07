@@ -5,6 +5,7 @@ amount the user chose; and, if turned on, a window of a day or more renewing wit
 REMINDER_UNDER percent used. Each is said once: a window once per run (a new run is a reset that has passed
 or moved), a balance once until it is topped up past the line again. What was said is kept in alerts.json,
 so a restart doesn't say it again. A reading that failed or is no longer current neither alerts nor clears.
+An alert is marked said only once its notice is out: one that couldn't be sent stays due.
 """
 import json
 import os
@@ -16,7 +17,7 @@ KEEP = 40 * 86400       # how long the mark of something no longer read is kept
 REMINDER_UNDER = 85     # a renewal with this share or more used loses little
 REMINDER_SPAN = 86400   # shorter windows renew too often to be news
 REMINDER_LEAD = 12 * 3600
-LEVELS = (0, 70, 80, 90)
+AT_ONCE = 5             # notices sent in one run; the rest wait for the next
 
 
 def same_run(mark, resets_at, now):
@@ -28,7 +29,8 @@ def same_run(mark, resets_at, now):
 
 
 def due(windows, balances, marks, percent, reminder, now):
-    """What the readings call for, oldest marks brought up to date in place.
+    """What the readings call for. Marks of what no longer applies are dropped in place; a returned
+    alert is marked only by told(), once said.
 
     windows: {id, used, resetsAt, span, current}; balances: {id, amount, line, current}."""
     out, seen = [], set()
@@ -41,12 +43,10 @@ def due(windows, balances, marks, percent, reminder, now):
         if percent <= 0 or w['used'] < percent:
             marks.pop(key, None)
         elif not (key in marks and same_run(marks[key], resets, now)):
-            marks[key] = {'at': now, 'until': resets}
-            out.append(dict(w, kind='usage'))
+            out.append(dict(w, kind='usage', mark=(key, {'at': now, 'until': resets})))
         if (reminder and resets and (w.get('span') or 0) >= REMINDER_SPAN and w['used'] < REMINDER_UNDER
                 and now < resets <= now + REMINDER_LEAD and not (rkey in marks and same_run(marks[rkey], resets, now))):
-            marks[rkey] = {'at': now, 'until': resets}
-            out.append(dict(w, kind='renews'))
+            out.append(dict(w, kind='renews', mark=(rkey, {'at': now, 'until': resets})))
     for b in balances:
         key = 'b|' + b['id']
         seen.add(key)
@@ -55,11 +55,16 @@ def due(windows, balances, marks, percent, reminder, now):
         if not b.get('line') or b['amount'] > b['line']:
             marks.pop(key, None)
         elif key not in marks:
-            marks[key] = {'at': now}
-            out.append(dict(b, kind='balance'))
+            out.append(dict(b, kind='balance', mark=(key, {'at': now})))
     for key in [k for k, m in marks.items() if k not in seen and now - m.get('at', 0) > KEEP]:
         del marks[key]
     return out
+
+
+def told(marks, alert):
+    """Mark alert as said, so it isn't said again this run."""
+    key, mark = alert['mark']
+    marks[key] = mark
 
 
 def load(state):
