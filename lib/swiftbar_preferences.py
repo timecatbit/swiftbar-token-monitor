@@ -35,6 +35,12 @@ def balance_line(value):
     return 0<number<1e9
 
 
+def balance_key(key):
+    """A balance alert is kept per API and currency, as 'kimi-api|USD'."""
+    provider,_,currency=str(key).partition('|')
+    return provider in catalog.BALANCE_APIS and currency in catalog.CURRENCIES
+
+
 def read(directory):
     defaults = {'schema': 1, 'visible': list(DEFAULT_VISIBLE), 'appearance': 'glass', 'paths': {}, 'allowCollapse': False, 'expandedProviders': [], 'revision': 0, 'configuredSubscriptions': [], 'claudeLiveUsage': False, 'claudeOAuthUsage': False,
                 'usageAlert': 90, 'resetReminder': False, 'balanceAlerts': {}}
@@ -57,7 +63,10 @@ def read(directory):
         if value.get('usageAlert') in ALERT_LEVELS and not isinstance(value['usageAlert'],bool):defaults['usageAlert']=value['usageAlert']
         if isinstance(value.get('resetReminder'),bool):defaults['resetReminder']=value['resetReminder']
         lines=value.get('balanceAlerts')
-        if isinstance(lines,dict):defaults['balanceAlerts']={k:v for k,v in lines.items() if k in catalog.BALANCE_APIS and balance_line(v)}
+        if isinstance(lines,dict):
+            # 5.14.0 kept one line per API, asked in the API's usual currency.
+            lines={k if '|' in k else k+'|'+catalog.BALANCE_CURRENCIES.get(k,''):v for k,v in lines.items()}
+            defaults['balanceAlerts']={k:v for k,v in lines.items() if balance_key(k) and balance_line(v)}
         expanded=value.get('expandedProviders')
         if isinstance(expanded,list):
             defaults['expandedProviders']=[k for k in USAGE if k in expanded]
@@ -111,7 +120,7 @@ def update(directory, kind, key=None, value=None):
         if key not in ('true','false'):raise ValueError('invalid reset reminder')
         current['resetReminder']=key=='true'
     elif kind == 'balance-alert':
-        if key not in catalog.BALANCE_APIS:raise ValueError('invalid balance alert')
+        if not balance_key(key):raise ValueError('invalid balance alert')
         if value in (None,'','0'):current['balanceAlerts'].pop(key,None)
         elif balance_line(value):current['balanceAlerts'][key]=float(value)
         else:raise ValueError('invalid balance alert')

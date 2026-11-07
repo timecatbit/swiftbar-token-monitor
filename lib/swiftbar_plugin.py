@@ -1856,14 +1856,14 @@ def alert_windows(data):
 
 
 def alert_balances(data):
-    """One balance per account of each API with a balance alert, as the homepage total counts them."""
-    out=[]
-    for provider,line in view_settings()['balanceAlerts'].items():
+    """One balance per account of each balance API, with the line set for its currency (None turns it off)."""
+    out=[];lines=view_settings()['balanceAlerts']
+    for provider in catalog.BALANCE_APIS:
         if not module_enabled(provider):continue
         counted=counted_values([v for v in api_values(provider,data)[1] if v.get('kind')=='balance'])
         for v in counted:
             out.append({'id':provider+'|'+':'.join(v['account']),'name':catalog.BY_KEY[provider].label+(' · '+v['label'] if len(counted)>1 else ''),
-                        'amount':v['amount'],'currency':v['currency'],'line':line,
+                        'amount':v['amount'],'currency':v['currency'],'line':lines.get(provider+'|'+v['currency']),
                         'current':not v.get('failed') and time.time()-(v.get('at') or 0)<=FRESH_READING})
     return out
 
@@ -2587,14 +2587,15 @@ def rename_api_key(provider,key_id):
     except ValueError:applescript('display alert "名字无效" message "请填写 1–24 个字符的名字。"')
 
 
-def set_balance_alert(provider):
-    """Ask for the amount under which this API's balance is told of; an empty answer turns it off."""
-    if provider not in catalog.BALANCE_APIS:raise ValueError('invalid balance alert')
-    line=view_settings()['balanceAlerts'].get(provider);currency=balance_currency(provider,api_values(provider,{})[1])
-    unit={'CNY':'元','USD':'美元'}.get(currency,currency)
+def set_balance_alert(provider,currency):
+    """Ask for the amount under which this API's balance in this currency is told of; an empty answer turns it off."""
+    key=provider+'|'+currency
+    if not preferences.balance_key(key):raise ValueError('invalid balance alert')
+    line=view_settings()['balanceAlerts'].get(key)
+    unit={'CNY':'元','USD':'美元'}.get(currency,' %s '%currency)
     answer=text_dialog('%s 余额降到多少%s以下时提醒？留空关闭。'%(catalog.BY_KEY[provider].label,unit),'%g'%line if line else '',title='余额提醒')
     if answer is None:return
-    try:preferences.update(STATE_DIR,'balance-alert',provider,answer.strip().lstrip('¥$').replace(',',''))
+    try:preferences.update(STATE_DIR,'balance-alert',key,answer.strip().lstrip('¥$').replace(',',''))
     except ValueError:applescript('display alert "金额无效" message "请填写大于 0 的数字，或留空关闭提醒。"')
 
 
@@ -2827,11 +2828,17 @@ def api_values(provider,data):
     return keys,values
 
 
-BALANCE_CURRENCIES={'deepseek':'CNY','grok':'USD','qoder-api':'Credits','kimi-api':'CNY'}
+CURRENCY_NAMES={'CNY':'人民币','USD':'美元','Credits':'Credits '}
 
 
-def balance_currency(provider,values):
-    return next((v['currency'] for v in values if v.get('kind')=='balance'),BALANCE_CURRENCIES.get(provider,'USD'))
+def balance_currencies(provider,keys,values):
+    """The currencies this API's keys hold; a Kimi key's site tells it before the first reading."""
+    def currency(entry,value):
+        if value.get('kind')=='balance':return value['currency']
+        if provider=='kimi-api':
+            return accounts.MOONSHOT_HOSTS.get((entry.get('options') or {}).get('region') or os.environ.get('MOONSHOT_REGION','china'),(None,'CNY'))[1]
+        return catalog.BALANCE_CURRENCIES[provider]
+    return list(dict.fromkeys(currency(e,v) for e,v in zip(keys,values)))
 
 
 def api_lines(provider,data):
@@ -2847,9 +2854,12 @@ def api_lines(provider,data):
         rows.extend(key_lines(provider,entry,data,2))
     rows.append(item('添加 Key…',level=1,sfimage='plus',**act('add-api-key',provider)))
     if provider in catalog.BALANCE_APIS and keys:
-        line=view_settings()['balanceAlerts'].get(provider)
-        rows.append(item('余额提醒…',level=1,sfimage='bell',badge='低于 '+money_text(line,balance_currency(provider,values)) if line else '关闭',
-                         **act('set-balance-alert',provider)))
+        # One line per currency: Kimi's China and international sites hold yuan and dollars.
+        currencies=balance_currencies(provider,keys,values);lines=view_settings()['balanceAlerts']
+        for currency in currencies:
+            line=lines.get(provider+'|'+currency)
+            rows.append(item('余额提醒…' if len(currencies)==1 else CURRENCY_NAMES[currency]+'余额提醒…',level=1,sfimage='bell',
+                             badge='低于 '+money_text(line,currency) if line else '关闭',**act('set-balance-alert',provider,currency)))
     rows.append(item('打开用量与账单',level=1,href=service.url,sfimage='arrow.up.right'))
     return rows
 
@@ -3198,7 +3208,8 @@ def run_action(name, extra):
         if len(extra)!=1:raise ValueError('invalid alert setting')
         preferences.update(STATE_DIR,'usage-alert' if name=='set-usage-alert' else 'reset-reminder',extra[0])
     elif name == 'set-balance-alert':
-        set_balance_alert(extra[0] if len(extra)==1 else '')
+        if len(extra)!=2:raise ValueError('invalid balance alert')
+        set_balance_alert(*extra)
     elif name == 'set-expanded':
         if len(extra)!=2:raise ValueError('invalid expansion action')
         preferences.update(STATE_DIR,'expanded',extra[0],extra[1])

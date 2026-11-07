@@ -69,6 +69,7 @@ class RuleTests(unittest.TestCase):
         due([],[dict(low,amount=100.0)],marks,0,False,now+120)
         self.assertEqual(len(due([],[dict(low,amount=19.0)],marks,0,False,now+180)),1)
         self.assertEqual(due([],[dict(low,amount=1.0,current=False,id='x')],{},0,False,now),[])
+        self.assertEqual(due([],[dict(low,line=None,id='y')],{},0,False,now),[])  # No line set for this currency.
     def test_an_alert_not_said_stays_due(self):
         now=1_800_000_000.0;marks={}
         self.assertEqual(len(alerts.due([window(91,now+DAY)],[],marks,90,False,now)),1)
@@ -133,27 +134,43 @@ class PluginAlertTests(unittest.TestCase):
             self.assertEqual(sent,['MiniMax 订阅 · W1','MiniMax 订阅 · W5','MiniMax 订阅 · W6'])
             del sent[:];self.m.check_usage_alerts()
             self.assertEqual(sent,[])
-    def test_balance_alert_is_set_per_api_and_each_key_of_unknown_account_alone(self):
+    def test_balance_alert_is_set_per_currency_and_each_key_of_unknown_account_alone(self):
         self.enable('kimi-api')
         ids=[]
         for n in range(2):
             self.m.keystore.add(self.m.STATE_DIR,'kimi-api','K%d'%n,'sk-PRIVATE-%d-1234567890'%n,{'region':'china'});ids.append(self.m.keystore.entries(self.m.STATE_DIR,'kimi-api')[-1]['id'])
-        with patch.object(self.m,'text_dialog',return_value='¥20'):self.m.run_action('set-balance-alert',['kimi-api'])
-        self.assertEqual(preferences.read(self.m.STATE_DIR)['balanceAlerts'],{'kimi-api':20.0})
+        with patch.object(self.m,'text_dialog',return_value='¥20') as ask:self.m.run_action('set-balance-alert',['kimi-api','CNY'])
+        self.assertIn('多少元以下',ask.call_args[0][0])
+        self.assertEqual(preferences.read(self.m.STATE_DIR)['balanceAlerts'],{'kimi-api|CNY':20.0})
         # Kimi tells no account, so two keys reading the same balance may still be two accounts.
         same={'balance':8.0,'currency':'CNY','_fetchedAt':self.now}
         rows=self.m.alert_balances({'kimi-api@'+ids[0]:same,'kimi-api@'+ids[1]:dict(same)})
         self.assertEqual([(r['name'],r['amount'],r['line'],r['current']) for r in rows],[('Kimi API · K0',8.0,20.0,True),('Kimi API · K1',8.0,20.0,True)])
         self.assertEqual(len({r['id'] for r in rows}),2)
         self.assertEqual(self.m.alert_notice(dict(rows[0],kind='balance')),('余额提醒','Kimi API · K0 余额 ¥8.00，已低于提醒线 ¥20.00'))
-        row=next(r for r in self.m.panel_entries(self.m.api_lines('kimi-api',{}))[0]['children'] if r['label']=='余额提醒…')
-        self.assertEqual(row['value'],'低于 ¥20.00')
-        with patch.object(self.m,'text_dialog',return_value=''):self.m.run_action('set-balance-alert',['kimi-api'])
-        self.assertEqual(preferences.read(self.m.STATE_DIR)['balanceAlerts'],{})
+        alert_rows=lambda:{r['label']:r for r in self.m.panel_entries(self.m.api_lines('kimi-api',{}))[0]['children'] if '余额提醒' in r['label']}
+        self.assertEqual({k:r['value'] for k,r in alert_rows().items()},{'余额提醒…':'低于 ¥20.00'})
+        # An international key holds dollars: its line is its own, asked in dollars.
+        self.m.keystore.add(self.m.STATE_DIR,'kimi-api','国际','sk-PRIVATE-9-1234567890',{'region':'international'})
+        self.assertEqual({k:r['value'] for k,r in alert_rows().items()},{'人民币余额提醒…':'低于 ¥20.00','美元余额提醒…':'关闭'})
+        self.assertEqual(alert_rows()['美元余额提醒…']['action'],['set-balance-alert','kimi-api','USD'])
+        with patch.object(self.m,'text_dialog',return_value='$5') as ask:self.m.run_action('set-balance-alert',['kimi-api','USD'])
+        self.assertIn('多少美元以下',ask.call_args[0][0])
+        self.assertEqual(preferences.read(self.m.STATE_DIR)['balanceAlerts'],{'kimi-api|CNY':20.0,'kimi-api|USD':5.0})
+        third=self.m.keystore.entries(self.m.STATE_DIR,'kimi-api')[-1]['id']
+        rows=self.m.alert_balances({'kimi-api@'+third:{'balance':3.0,'currency':'USD','_fetchedAt':self.now}})
+        self.assertEqual(self.m.alert_notice(dict(rows[0],kind='balance'))[1],'Kimi API 余额 $3.00，已低于提醒线 $5.00')
+        with patch.object(self.m,'text_dialog',return_value=''):self.m.run_action('set-balance-alert',['kimi-api','CNY'])
+        self.assertEqual(preferences.read(self.m.STATE_DIR)['balanceAlerts'],{'kimi-api|USD':5.0})
         with patch.object(self.m,'text_dialog',return_value='abc'),patch.object(self.m,'applescript') as warn:
-            self.m.run_action('set-balance-alert',['kimi-api'])
-        warn.assert_called_once();self.assertEqual(preferences.read(self.m.STATE_DIR)['balanceAlerts'],{})
-        with self.assertRaises(ValueError):self.m.run_action('set-balance-alert',['chatgpt-api'])
+            self.m.run_action('set-balance-alert',['kimi-api','CNY'])
+        warn.assert_called_once();self.assertEqual(preferences.read(self.m.STATE_DIR)['balanceAlerts'],{'kimi-api|USD':5.0})
+        for bad in (['chatgpt-api','USD'],['kimi-api','EUR'],['kimi-api']):
+            with self.assertRaises(ValueError):self.m.run_action('set-balance-alert',bad)
+    def test_a_5_14_0_balance_line_keeps_the_currency_it_was_asked_in(self):
+        Path(self.m.STATE_DIR).mkdir(parents=True,exist_ok=True)
+        (Path(self.m.STATE_DIR)/'preferences.json').write_text(json.dumps({'schema':1,'balanceAlerts':{'kimi-api':20,'qoder-api':500,'chatgpt-api':1,'grok|EUR':3}}))
+        self.assertEqual(preferences.read(self.m.STATE_DIR)['balanceAlerts'],{'kimi-api|CNY':20,'qoder-api|Credits':500})
     def test_settings_rows_switch_levels_and_the_reminder(self):
         settings=next(o for o in self.m.module_options() if o['label']=='外观与设置')['children']
         menu=next(r for r in settings if r['label']=='用量提醒')

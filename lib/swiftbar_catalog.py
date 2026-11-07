@@ -42,6 +42,9 @@ BY_KEY = {s.key: s for s in SERVICES}
 MANUAL_SUBSCRIPTIONS = tuple(s.key for s in SERVICES if s.category == '订阅' and s.capability == 'portal')
 PORTAL_APIS = tuple(s.key for s in SERVICES if s.category == 'API' and s.capability == 'portal')
 BALANCE_APIS = tuple(s.key for s in SERVICES if s.category == 'API' and s.capability == 'balance')
+# Each balance API's usual currency; Kimi's international site and some DeepSeek accounts report USD.
+BALANCE_CURRENCIES = {'deepseek': 'CNY', 'grok': 'USD', 'kimi-api': 'CNY', 'qoder-api': 'Credits'}
+CURRENCIES = ('CNY', 'USD', 'Credits')
 # A key alone configures these; DeepSeek can also come from OpenCodex, Grok needs a Team ID and Qoder CN an organization ID.
 KEY_ONLY_APIS = tuple(s.key for s in SERVICES if s.category == 'API' and s.key not in ('deepseek', 'grok', 'qoder-api'))
 API_KEYS = {s.key: s.credential for s in SERVICES if s.credential}
