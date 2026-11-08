@@ -163,11 +163,17 @@ class CatalogTests(unittest.TestCase):
         # alike, so keys are neither summed nor merged by their readings; a lone figure is still the total.
         x,y=keys('kimi-api',{'region':'china'},{'region':'china'})
         same={'balance':100.0,'currency':'CNY','_fetchedAt':now}
-        self.assertEqual(self.entry('Kimi API',{'kimi-api@'+x:same,'kimi-api@'+y:dict(same,balance=99.99)})['value'],'余额 K0 ¥100.00 · K1 ¥99.99')
+        listed=self.entry('Kimi API',{'kimi-api@'+x:same,'kimi-api@'+y:dict(same,balance=99.99)})
+        self.assertEqual(listed['value'],'余额 K0 ¥100.00 · K1 ¥99.99')
+        # Where the names don't fit the row, the panel shows the bare amounts, then the key count.
+        self.assertEqual(listed['fallbacks'],['余额 ¥100.00 · ¥99.99','2 把 Key'])
+        failed=self.entry('Kimi API',{'kimi-api@'+x:same,'kimi-api@'+y:dict(same,balance=99.99),'kimi-api@'+y+'_error':(0,'超时',None)})
+        self.assertEqual(failed['fallbacks'],['余额 ¥100.00 · ¥99.99 · 刷新失败','2 把 Key · 刷新失败'])
         row=self.entry('Kimi API',{'kimi-api@'+x:same,'kimi-api@'+y:dict(same)})
         self.assertEqual(row['value'],'余额 K0 ¥100.00 · K1 ¥100.00')
         self.assertFalse(any(k.get('detail') for k in row['children'] if k.get('children')))
-        self.assertEqual(self.entry('Kimi API',{'kimi-api@'+x:same})['value'],'余额 ¥100.00')
+        alone=self.entry('Kimi API',{'kimi-api@'+x:same})
+        self.assertEqual(alone['value'],'余额 ¥100.00');self.assertNotIn('fallbacks',alone)
     def test_classic_key_file_stays_the_default_and_user_files_are_never_deleted(self):
         legacy=Path(self.m.STATE_DIR)/'keys'/'openai_api_key.key';legacy.parent.mkdir(parents=True);legacy.write_text('sk-OLD-TYPED-COPY')
         chosen=self.root/'my-openai-key';chosen.write_text('sk-USER-OWNED-FILE')
@@ -243,4 +249,9 @@ class CatalogTests(unittest.TestCase):
         with patch.object(self.m,'chatgpt_source',return_value='proxy'):
             rows=self.m.panel_entries(self.m.chatgpt_lines(data))
         self.assertEqual(rows[0]['value'],'5 个账户')
+        self.assertNotIn('fallbacks',rows[0])
+        data['accounts']['accounts']=data['accounts']['accounts'][:2]
+        with patch.object(self.m,'chatgpt_source',return_value='proxy'):
+            row=self.m.panel_entries(self.m.chatgpt_lines(data))[0]
+        self.assertTrue(row['value'].startswith('已用 account-0'));self.assertEqual(row['fallbacks'],['2 个账户'])
         for i in range(5):self.assertTrue(any('account-'+str(i) in e['label'] for e in rows[0]['children']))

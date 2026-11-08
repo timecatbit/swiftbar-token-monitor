@@ -110,6 +110,16 @@ expect(MenuLayout.configured("已同步")==nil,"Connection results must not be c
 let configuredEntry=try JSONDecoder().decode(Entry.self,from:Data("{\"label\":\"ChatGPT 本机用量\",\"value\":\"已配置\",\"symbol\":\"folder\",\"children\":[{\"label\":\"目录\",\"children\":[]}]}".utf8))
 expect(MenuLayout.valueWidth(configuredEntry)==MenuLayout.width("已配置",font:MenuLayout.valueFont)+12,"Indicator reserves its own column")
 expect(MenuLayout.labelWidth(configuredEntry,width:280,left:36)+36+MenuLayout.trailing(configuredEntry)+MenuLayout.valueWidth(configuredEntry)+10==280,"Status, label and arrow cannot overlap")
+// Two keys with 19-character names need far more than a homepage row; the value gives way, never the title.
+let longNames=try JSONDecoder().decode(Entry.self,from:Data("{\"label\":\"Kimi API\",\"value\":\"余额 一二三四五六七八九十一二三四五六七八九 ¥100.00 · 九八七六五四三二一十九八七六五四三二一 ¥99.99\",\"fallbacks\":[\"余额 ¥100.00 · ¥99.99\",\"2 把 Key\"],\"children\":[{\"label\":\"K0\",\"children\":[]}]}".utf8))
+let shown=MenuLayout.fitted(longNames,width:344,left:36)
+expect(shown.value=="余额 ¥100.00 · ¥99.99","Key names that don't fit give way to the bare amounts")
+expect(MenuLayout.labelWidth(shown,width:344,left:36)>=MenuLayout.width("Kimi API",font:MenuLayout.labelFont(shown)),"The title keeps its full width beside the value")
+expect(MenuLayout.rowHeight(longNames,width:344,left:36)==MenuLayout.rowHeight(shown,width:344,left:36),"Rows are measured with the value they show")
+var many=longNames;many.fallbacks=["余额 ¥1000000.00 · ¥2000000.00 · ¥3000000.00 · ¥4000000.00","4 把 Key"]
+expect(MenuLayout.fitted(many,width:344,left:36).value=="4 把 Key","Amounts that still don't fit give way to the key count")
+var roomy=longNames;roomy.value="余额 默认 ¥228.37 · lab ¥-0.69"
+expect(MenuLayout.fitted(roomy,width:344,left:36).value==roomy.value,"Names that fit stay listed")
 let mergedEntry=try JSONDecoder().decode(Entry.self,from:Data("{\"label\":\"ChatGPT 订阅\",\"checked\":false,\"value\":\"已配置\",\"action\":[\"set-module\",\"chatgpt\",\"true\"],\"children\":[{\"label\":\"选择配置目录\",\"action\":[\"choose-client-home\",\"chatgpt\"],\"children\":[]}]}".utf8))
 expect(!MenuLayout.configurationClick(mergedEntry,x:19,width:264),"Checkbox click toggles rather than opening settings")
 expect(!MenuLayout.configurationClick(mergedEntry,x:110,width:264),"Label click retains multi-select behavior")

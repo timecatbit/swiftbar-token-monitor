@@ -1289,6 +1289,8 @@ def update_attention_count(rows):
 
 # Status lights shared by every panel row: new (accent), ok (green), issue (orange), unknown (hollow).
 STATUS_LIGHTS = ('new', 'ok', 'issue', 'unknown')
+# Separates a homepage value's shorter forms; key names and amounts never hold control characters.
+FALLBACK = '\x1f'
 
 def update_indicator(row):
     if row.get('needsAttention') or '失败' in row.get('status',''):return 'issue'
@@ -2265,8 +2267,9 @@ def chatgpt_lines(data):
         if not usage:badge='正在读取' if ocx_configured() else '未配置'
         elif len(usage)==1:badge=(used_text(usage[0][1]) if usage[0][1] is not None else '额度待同步')+usage[0][2]
         else:badge='已用 '+' · '.join('%s %s%s'%(name,'%g%%'%round(used,1) if used is not None else '—',state) for name,used,state in usage)
-        if len(usage)>2 or len(badge)>32:badge='%d 个账户'%len(usage)
-        lines=[item(label,badge=badge,**brand_icon('chatgpt'),panelusagelevel=usage_level(max(known)) if known else None)]
+        compact='%d 个账户'%len(usage)
+        if len(usage)>2 or len(badge)>32:badge=compact
+        lines=[item(label,badge=badge,panelfallback=compact if len(usage)>1 and badge!=compact else None,**brand_icon('chatgpt'),panelusagelevel=usage_level(max(known)) if known else None)]
         lines.append(item('来源 · OpenCodex 账户 · 编程工具额度',level=1,color=MUTED,size=10))
         for name,used,state in usage:
             lines.append(item(name,level=1,badge=(used_text(used) if used is not None else '额度待同步')+state,
@@ -2752,20 +2755,23 @@ def counted_values(values):
 
 
 def api_badge(values):
-    """Homepage total: balances or spend are summed per currency and account; otherwise the shared key state.
-    Keys that tell no account may share one, so beside another figure they are listed by name, not summed."""
-    if not values:return '未配置'
+    """Homepage total and its shorter forms: balances or spend are summed per currency and account; otherwise the shared key state.
+    Keys that tell no account may share one, so beside another figure they are listed by name, not summed;
+    where the names don't fit the row the panel shows the bare amounts, then the key count."""
+    if not values:return '未配置',[]
     for kind,prefix in (('balance','余额 '),('spend','本月已用 ')):
         rows=counted_values([v for v in values if v.get('kind')==kind])
         if not rows:continue
         failed=any(v.get('failed') for v in rows)
         if len(rows)>1 and any(v['account'][0]=='key' for v in rows):
-            return with_failure(prefix+' · '.join(v['label']+' '+money_text(v['amount'],v['currency']) for v in rows),True,failed)
+            amounts=[money_text(v['amount'],v['currency']) for v in rows]
+            forms=[prefix+' · '.join(v['label']+' '+a for v,a in zip(rows,amounts)),prefix+' · '.join(amounts),'%d 把 Key'%len(values)]
+            return with_failure(forms[0],True,failed),[with_failure(f,True,failed) for f in forms[1:]]
         totals={}
         for v in rows:totals[v['currency']]=totals.get(v['currency'],0)+v['amount']
-        return with_failure(prefix+' · '.join(money_text(a,c) for c,a in totals.items()),True,failed)
+        return with_failure(prefix+' · '.join(money_text(a,c) for c,a in totals.items()),True,failed),[]
     texts={v['text'] for v in values}
-    return texts.pop() if len(texts)==1 else '%d 把 Key'%len(values)
+    return (texts.pop() if len(texts)==1 else '%d 把 Key'%len(values)),[]
 
 
 def key_lines(provider,entry,data,level):
@@ -2845,7 +2851,8 @@ def api_lines(provider,data):
     service=catalog.BY_KEY[provider];keys,values=api_values(provider,data);first={}
     for entry,value in zip(keys,values):
         if value.get('account'):first.setdefault(value['account'],entry)
-    rows=[item(service.label,badge=api_badge(values),**brand_icon(provider))]
+    badge,shorter=api_badge(values)
+    rows=[item(service.label,badge=badge,panelfallback=FALLBACK.join(shorter) or None,**brand_icon(provider))]
     for entry,value in zip(keys,values):
         same=first.get(value.get('account'))
         # The key reads an organization or team an earlier key already counts; say so where the homepage total would surprise.
@@ -2911,6 +2918,8 @@ def panel_entries(lines):
             if attrs.get('panelradio') in ('on','off'):entry.update(radio=True,checked=attrs['panelradio']=='on')
             if attrs.get("badge"):
                 entry["value"] = attrs["badge"]
+            if attrs.get("panelfallback"):
+                entry["fallbacks"] = attrs["panelfallback"].split(FALLBACK)
             if attrs.get("paneldetail"):
                 entry["detail"] = attrs["paneldetail"]
             if attrs.get("href"):
@@ -3051,7 +3060,7 @@ def native_menu_line(line):
     label,separator,raw=line.partition(' | ')
     if not separator:return line
     options=dict(part.split('=',1) for part in shlex.split(raw) if '=' in part)
-    for key in ('color','sfcolor','sfcolors','panelattention','paneldetail','panelsection','panelstatus','panelradio','panelusagelevel'):options.pop(key,None)
+    for key in ('color','sfcolor','sfcolors','panelattention','paneldetail','panelfallback','panelsection','panelstatus','panelradio','panelusagelevel'):options.pop(key,None)
     return label+separator+' '.join(as_option(k,v) for k,v in options.items())
 
 

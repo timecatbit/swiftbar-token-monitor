@@ -4,7 +4,7 @@ import Darwin
 
 struct Entry: Decodable {
     var label:String;var separator:Bool?;var image:String?;var template:Bool?;var symbol:String?
-    var section:Bool?;var attention:Bool?;var checked:Bool?;var detail:String?;var value:String?;var usageLevel:String?;var statusLight:String?;var radio:Bool?;var href:String?;var action:[String]?;var onOpenAction:[String]?;var children:[Entry]
+    var section:Bool?;var attention:Bool?;var checked:Bool?;var detail:String?;var value:String?;var fallbacks:[String]?;var usageLevel:String?;var statusLight:String?;var radio:Bool?;var href:String?;var action:[String]?;var onOpenAction:[String]?;var children:[Entry]
     var actionable:Bool { !children.isEmpty || href != nil || action != nil }
     var isModule:Bool {action?.first=="set-module"}
     var key:String {if isModule,let action{return action.prefix(2).joined(separator:"\u{001F}")}
@@ -573,7 +573,15 @@ enum MenuLayout {
     static func valueWidth(_ e:Entry)->CGFloat {e.value.map{width($0,font:valueFont)+(e.attention==true ? 16 : configured($0) != nil ? 12 : 0)} ?? 0}
     static func trailing(_ e:Entry)->CGFloat {e.children.isEmpty ? 12 : 32}
     static func labelWidth(_ e:Entry,width:CGFloat,left:CGFloat)->CGFloat {max(24,width-left-trailing(e)-valueWidth(e)-(e.value == nil ? 0 : 10))}
+    // A value too wide for its row gives way to its shorter forms, so neither the title nor the value is cut.
+    static func fitted(_ e:Entry,width:CGFloat,left:CGFloat)->Entry {
+        guard let value=e.value,let shorter=e.fallbacks,!shorter.isEmpty else{return e}
+        let room=width-left-trailing(e)-10-MenuLayout.width(e.label,font:labelFont(e));var entry=e
+        for form in [value]+shorter {entry.value=form;if valueWidth(entry)<=room{break}}
+        return entry
+    }
     static func rowHeight(_ e:Entry,width:CGFloat,left:CGFloat)->CGFloat {
+        let e=fitted(e,width:width,left:left)
         if e.separator==true{return 12}
         if e.section==true{return 25}
         let titleHeight=height(e.label,font:labelFont(e),width:labelWidth(e,width:width,left:left))
@@ -962,7 +970,7 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
     private func fillRows(_ entries:[Entry],in content:NSView,y start:CGFloat,width:CGFloat,depth:Int)->CGFloat {
         while rows.count<=depth{rows.append([:])};rows[depth]=[:];var y=start
         for original in entries {var entry=original;if let label=PanelInteraction.runningLabel(entry,active:interaction.active){entry.label=label}
-            let left=MenuLayout.column(entries),h=MenuLayout.rowHeight(entry,width:width,left:left)
+            let left=MenuLayout.column(entries);entry=MenuLayout.fitted(entry,width:width,left:left);let h=MenuLayout.rowHeight(entry,width:width,left:left)
             if entry.separator==true {content.addSubview(depth==0 ? Divider(frame:NSRect(x:8,y:y+5,width:width-16,height:2)) : {let line=NSBox(frame:NSRect(x:8,y:y+5,width:width-16,height:1));line.boxType = .separator;return line}())}
             else {let row=Row(entry,frame:NSRect(x:0,y:y,width:width,height:h));row.columnInset=entry.section==true ? 12 : left;row.pointerAllowed={[weak self,weak row] in guard let self,let row else{return false};return self.pointerHits(row)};row.invoke={[weak self] e,r in self?.activate(e,row:r,depth:depth)};row.hover={[weak self] e,r in self?.hover(e,row:r,depth:depth)};content.addSubview(row);rows[depth][entry.key]=row}
             y+=h
