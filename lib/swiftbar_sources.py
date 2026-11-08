@@ -249,7 +249,9 @@ def _stream(path):
     return process.stdout, process, timer
 
 
-def jsonl_usage(source, root, cache, start, end, zone, exclude_proxy=False):
+def jsonl_usage(source, root, cache, start, end, zone, exclude_proxy=False, proxy_log=None):
+    """proxy_log: OpenCodex's own request log. Local records of requests it carried are dropped one by one;
+    without it, the plugin can only tell proxy sessions by their provider name."""
     root = Path(root).expanduser()
     if not root.is_dir():
         return {'error': '未找到记录目录'}
@@ -312,7 +314,10 @@ def jsonl_usage(source, root, cache, start, end, zone, exclude_proxy=False):
             except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
                 errors += 1
         conn.commit()
-        result = aggregate(unique_events(conn, start, end), start, end, zone, exclude_proxy, codex_cost if source == 'codex' else model_cost)
+        try:carried = proxy_requests(proxy_log, cache, start, end) if proxy_log else None
+        except (OSError, ValueError, sqlite3.Error):carried = None
+        result = aggregate(unique_events(conn, start, end), start, end, zone, exclude_proxy, codex_cost if source == 'codex' else model_cost, carried)
+        result['proxyMatched'] = carried is not None
         if errors:
             result['warning'] = '部分记录无法读取'
             result['partial'] = True
@@ -327,6 +332,64 @@ def jsonl_usage(source, root, cache, start, end, zone, exclude_proxy=False):
         conn.close()
 
 
+# A local record and OpenCodex's record of one request usually finish within seconds of each other;
+# Codex's auto-review writes its record a few minutes late. The exact token split is what identifies the call.
+MATCH_WINDOW = 600
+
+
+def proxy_requests(path, cache, start, end):
+    """The requests OpenCodex logged around start..end, as (input, cached, output) tokens -> finish times.
+    Its log is appended to; when it is rewritten (new file, shorter, or another first line) the index
+    starts over, so requests it no longer reports are not held against the local records either.
+    Only these counters are kept, never request content."""
+    path = Path(path); st = path.stat()
+    with path.open('rb') as handle:head = identity(handle.readline(4096).decode('utf-8', 'replace'))
+    db = Path(cache) / ('harness-ocx-v1-' + identity(str(path.resolve()))[:12] + '.sqlite3')
+    db.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    conn = sqlite3.connect(db, timeout=10); os.chmod(db, 0o600)
+    try:
+        conn.executescript('CREATE TABLE IF NOT EXISTS log(id INTEGER PRIMARY KEY CHECK(id=1), inode INTEGER, head TEXT, offset INTEGER); CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY, ts REAL, input INTEGER, cached INTEGER, output INTEGER); CREATE INDEX IF NOT EXISTS requests_ts ON requests(ts);')
+        known = conn.execute('SELECT inode,head,offset FROM log').fetchone()
+        offset = known[2] if known and known[:2] == (st.st_ino, head) and known[2] <= st.st_size else 0
+        if not offset:conn.execute('DELETE FROM requests')
+        with path.open('rb') as handle:
+            handle.seek(offset)
+            while True:
+                line = handle.readline(32 * 1024 * 1024)
+                if not line or not line.endswith(b'\n'):break  # Never checkpoint an incomplete tail.
+                offset += len(line)
+                try:
+                    row = json.loads(line); usage = row.get('usage')
+                    if not isinstance(usage, dict):continue
+                    finished = (number(row['timestamp']) + number(row.get('durationMs'))) / 1000
+                    conn.execute('INSERT OR REPLACE INTO requests VALUES (?,?,?,?,?)', (identity(row.get('requestId') or line.decode('utf-8', 'replace')), finished,
+                                 int(number(usage.get('inputTokens'))), int(number(usage.get('cachedInputTokens'))), int(number(usage.get('outputTokens')))))
+                except (KeyError, TypeError, AttributeError, ValueError):
+                    continue
+        conn.execute('INSERT OR REPLACE INTO log VALUES (1,?,?,?)', (st.st_ino, head, offset))
+        conn.commit()
+        carried = {}
+        for finished, inputs, cached, output in conn.execute('SELECT ts,input,cached,output FROM requests WHERE ts>=? AND ts<=?', (start - MATCH_WINDOW, end + MATCH_WINDOW)):
+            carried.setdefault((inputs, cached, output), []).append(finished)
+        return carried
+    except BaseException:
+        conn.rollback(); raise
+    finally:
+        conn.close()
+
+
+def carried_by_proxy(carried, event):
+    """Whether OpenCodex logged this very request: the same token split, finished within MATCH_WINDOW.
+    Each logged request accounts for one local record only."""
+    inputs, cached, output = (int(number(event.get(k))) for k in ('input', 'cached', 'output'))
+    times = carried.get((inputs + cached, cached, output))
+    if not times:return False
+    nearest = min(times, key=lambda t:abs(t - event['timestamp']))
+    if abs(nearest - event['timestamp']) > MATCH_WINDOW:return False
+    times.remove(nearest)
+    return True
+
+
 def forget_missing(conn, active):
     for (key,) in conn.execute('SELECT path FROM files').fetchall():
         if key not in active:
@@ -339,7 +402,7 @@ def unique_events(conn, start, end):
     return (json.loads(row[0]) for row in rows)
 
 
-def aggregate(events, start, end, zone, exclude_proxy=False, price=None):
+def aggregate(events, start, end, zone, exclude_proxy=False, price=None, carried=None):
     def empty():
         return dict(totalTokens=0, inputTokens=0, outputTokens=0, cachedInputTokens=0,
                     requests=0, estimatedCostUsd=0, unpricedRequests=0, credits=0)
@@ -347,7 +410,7 @@ def aggregate(events, start, end, zone, exclude_proxy=False, price=None):
     for event in events:
         ts = event['timestamp']
         if not start <= ts <= end: continue
-        if exclude_proxy and str(event.get('provider', '')).lower() in ('opencodex', 'ocx'):
+        if (exclude_proxy and str(event.get('provider', '')).lower() in ('opencodex', 'ocx')) or (carried and carried_by_proxy(carried, event)):
             excluded += 1; continue
         i, o, r, w = [number(event.get(k)) for k in ('input', 'output', 'cached', 'writes')]
         credits = number(event.get('credits'))

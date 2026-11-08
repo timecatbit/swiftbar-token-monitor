@@ -160,6 +160,12 @@ def range_cache_name(key=None):
 def ocx_configured():
     return bool(os.environ.get('OCX_BASE_URL') or os.path.isfile(TOKEN_FILE) or os.path.isfile(os.path.join(OCX_HOME, 'runtime-port.json')))
 
+
+def ocx_request_log():
+    """OpenCodex's own log of the requests it carried, when it runs on this Mac; a remote one's isn't here."""
+    path=os.path.join(OCX_HOME,'usage.jsonl')
+    return path if urllib.parse.urlparse(BASE).hostname in ('127.0.0.1','localhost','::1') and os.path.isfile(path) else None
+
 CACHE_SCOPE = hashlib.sha256(os.path.abspath(STATE_DIR).encode()).hexdigest()[:16]
 CACHE_DIR = os.path.join(os.environ.get("OCX_CACHE_DIR") or tempfile.gettempdir(),
                          "opencodex-swiftbar-v5-%s-%s" % (os.getuid(), CACHE_SCOPE))
@@ -1704,7 +1710,8 @@ def range_usage_cached():
                 if not root:return {'error':'请选择记录目录'}
                 if source=='gemini':return sources.gemini_usage(root,CACHE_DIR,start,end,now.tzinfo,'opencodex' in enabled)
                 if source=='opencode':return sources.opencode_usage(root,start,end,now.tzinfo,'opencodex' in enabled)
-                return sources.jsonl_usage(source,root,CACHE_DIR,start,end,now.tzinfo,'opencodex' in enabled)
+                proxy_log=ocx_request_log() if source=='codex' and 'opencodex' in enabled else None
+                return sources.jsonl_usage(source,root,CACHE_DIR,start,end,now.tzinfo,'opencodex' in enabled,proxy_log)
             except Exception:return {'error':'记录暂不可用'}
         bundle={'range':key,'start':start,'end':end}
         with ThreadPoolExecutor(max_workers=max(1,len(enabled))) as pool:
@@ -1936,7 +1943,7 @@ def background_refresh():
 
 
 # Index generations in use; older generations, removed snapshots and stray temp files are dropped.
-CURRENT_INDEXES = ('claude-app-usage-v3-', 'harness-v4-', 'harness-gemini-v2-')
+CURRENT_INDEXES = ('claude-app-usage-v3-', 'harness-v4-', 'harness-gemini-v2-', 'harness-ocx-v1-')
 INDEX_FILE = re.compile(r'(?:claude-app-usage|claude-usage|harness)-.+\.sqlite3(?:-journal|-wal|-shm)?')
 RETIRED_CACHES = ('startup.json', 'usage_today.json', 'usage_7d.json')
 
@@ -3005,11 +3012,13 @@ def dashboard_payload(data):
         subtitle='已排除代理重复' if source=='codex' and usage.get('excludedProxyRequests') else ''
         status='运行正常' if source=='opencodex' and data.get('healthz') else '已同步'
         providers.append(provider(source,label,usage,subtitle,status))
-    # Codex local records and an active OpenCodex proxy can describe the same calls.
-    # Keep both cards available, but use the proxy as the summary authority.
+    # Codex local records and an active OpenCodex proxy can describe the same calls. Checked request by
+    # request against OpenCodex's own log, the local card keeps only the calls OpenCodex didn't carry and
+    # counts; without that log the proxy stays the summary authority.
     proxy_available=any(p['id']=='opencodex' and p['available'] for p in providers)
+    matched={source for source,_,usage in selected if usage.get('proxyMatched')}
     for p in providers:
-        p['summaryIncluded']=not (p['id']=='codex' and proxy_available)
+        p['summaryIncluded']=not (p['id']=='codex' and proxy_available and 'codex' not in matched)
         if not p['summaryIncluded']:p['subtitle']='未计入 Summary'
     # Crop only today's chart, never the statistics window. Preserve a short zero
     # lead-in before the earliest source activity, and use actual time spacing.

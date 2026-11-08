@@ -54,6 +54,30 @@ class SourceTests(unittest.TestCase):
         result=self.read(exclude=True)
         self.assertEqual(result['summary']['totalTokens'],0);self.assertEqual(result['excludedProxyRequests'],1)
         self.assertEqual(self.read(exclude=False)['summary']['totalTokens'],150)
+    def ocx_log(self,rows,mode='w'):
+        path=Path(self.temp.name)/'usage.jsonl'
+        with path.open(mode) as out:out.write(''.join(json.dumps(row)+'\n' for row in rows))
+        return path
+    def ocx(self,request,finished,inputs=140,cached=40,output=10,duration=2000):
+        return {'requestId':request,'timestamp':(finished*1000)-duration,'durationMs':duration,'prompt':'SECRET-BODY',
+                'usage':{'inputTokens':inputs,'cachedInputTokens':cached,'outputTokens':output,'totalTokens':inputs+output}}
+    def test_requests_opencodex_logged_are_dropped_one_by_one(self):
+        self.write(self.root/'one.jsonl',[{'type':'session_meta','payload':{'id':'s','model_provider':'openai'}},
+                                          self.codex(150,150,1000),self.codex(300,150,5000),self.codex(450,150,9000),self.codex(600,150,9005)])
+        read=lambda log:sources.jsonl_usage('codex',self.root,self.cache,0,9999999999,timezone.utc,True,log)
+        # OpenCodex carried the first call. The second went around it; the third and fourth share one logged
+        # request, which accounts for only one of them; another split or a finish minutes away is not the same call.
+        log=self.ocx_log([self.ocx('a',1000.4),self.ocx('b',5000,inputs=999),{'requestId':'failed','timestamp':5000000,'status':500},
+                          self.ocx('c',9004),self.ocx('d',5000+1200)])
+        result=read(log)
+        self.assertTrue(result['proxyMatched']);self.assertEqual(result['excludedProxyRequests'],2);self.assertEqual(result['summary']['requests'],2)
+        self.ocx_log([self.ocx('e',5001)],'a')  # Appended later: read on from where the index stopped.
+        self.assertEqual(read(log)['summary']['requests'],1)
+        self.ocx_log([self.ocx('b',5000,inputs=999)])  # Rewritten: requests it no longer reports drop out.
+        self.assertEqual(read(log)['summary']['requests'],4)
+        for path in self.cache.glob('*.sqlite3'):self.assertNotIn(b'SECRET-BODY',path.read_bytes())
+        # Without OpenCodex's own log nothing is matched, and the plugin keeps the proxy as the authority.
+        self.assertFalse(read(None)['proxyMatched']);self.assertFalse(read(Path(self.temp.name)/'gone.jsonl')['proxyMatched'])
     def test_cumulative_only_and_delta_only_records_are_not_dropped(self):
         one=self.codex(150,150,100);one['payload']['info'].pop('last_token_usage')
         two=self.codex(300,150,200);two['payload']['info'].pop('last_token_usage')

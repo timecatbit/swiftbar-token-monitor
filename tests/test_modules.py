@@ -140,6 +140,12 @@ class ModuleTests(unittest.TestCase):
         included=[p for p in providers if p['summaryIncluded']]
         self.assertEqual(sum(p['tokens'] for p in included),100)
         self.assertFalse(next(p for p in providers if p['id']=='codex')['summaryIncluded'])
+        # Checked against OpenCodex's own log, the local card holds only calls OpenCodex never saw, so both count.
+        bundle['codex']={'summary':{'totalTokens':40,'requests':1},'proxyMatched':True,'excludedProxyRequests':1}
+        providers=self.m.dashboard_payload({'range_usage':bundle})['providers']
+        codex=next(p for p in providers if p['id']=='codex')
+        self.assertTrue(codex['summaryIncluded']);self.assertEqual(codex['subtitle'],'已排除代理重复')
+        self.assertEqual(sum(p['tokens'] for p in providers if p['summaryIncluded']),140)
     def test_explicit_deepseek_key_overrides_proxy_account(self):
         with patch.dict(os.environ,{'DEEPSEEK_API_KEY_FILE':'/path/selected-by-user'}),patch.object(self.m,'ocx_configured',return_value=True),patch.object(self.m,'deepseek_balance_direct',return_value={'reports':[]}) as direct,patch.object(self.m,'request') as proxy:
             self.m.provider_quotas_cached()
