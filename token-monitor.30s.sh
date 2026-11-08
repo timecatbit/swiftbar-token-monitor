@@ -1,6 +1,6 @@
 #!/bin/bash
 # <xbar.title>token-monitor</xbar.title>
-# <xbar.version>5.14.0</xbar.version>
+# <xbar.version>5.14.1</xbar.version>
 # <xbar.author>minicoke</xbar.author>
 # <xbar.author.github>timecatbit/swiftbar-token-monitor</xbar.author.github>
 # <xbar.desc>可选 AI 客户端用量、账户资源与 Komari 监控，使用原生 macOS 面板。</xbar.desc>
