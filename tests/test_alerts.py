@@ -111,6 +111,14 @@ class PluginAlertTests(unittest.TestCase):
         self.assertEqual(rows['qoder-subscription|套餐 Credits']['used'],90)
         stale=dict(data['claude_subscription'],updatedAt=self.now-700)
         self.assertFalse(self.m.alert_windows({'claude_subscription':stale})[0]['current'])
+    def test_proxy_quota_is_not_current_while_opencodex_is_unreachable(self):
+        self.enable('chatgpt')
+        data={'accounts':{'accounts':[{'id':'a','logLabel':'main'}]},'quota':{'_fetchedAt':self.now-60,'quotas':{'a':{'weeklyPercent':95}}},'quota_error':None}
+        with patch.object(self.m,'chatgpt_source',return_value='proxy'):
+            self.assertTrue(self.m.alert_windows(data)[0]['current'])
+            # The quota cache itself has no error: OpenCodex's health check is what failed.
+            data['healthz_error']=(0,'connection refused',None)
+            self.assertFalse(self.m.alert_windows(data)[0]['current'])
     def test_check_says_each_alert_once_with_its_window_and_reset(self):
         self.enable('chatgpt')
         data={'chatgpt':{'_fetchedAt':self.now,'windows':[{'name':'codex','minutes':10080,'remaining':5,'resetsAt':self.now+3600}]},'chatgpt_error':None}

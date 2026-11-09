@@ -1820,6 +1820,12 @@ def reading_current(payload,error):
     return bool(payload) and not refresh_failed(error) and time.time()-(payload.get('_fetchedAt') or 0)<=FRESH_READING
 
 
+def proxy_quota_error(data):
+    """While OpenCodex is unreachable its account quota isn't being read, whatever that cache says."""
+    health=data.get('healthz_error')
+    return health if refresh_failed(health) else data.get('quota_error')
+
+
 def alert_windows(data):
     """Every subscription window the homepage shows, as the usage alerts read it."""
     out=[]
@@ -1833,7 +1839,7 @@ def alert_windows(data):
             except (ValueError,TypeError,OverflowError):resets=None
             add('claude-subscription','Claude 订阅',w['label'],w['used'],resets,claude_span(w),current)
     if module_enabled('chatgpt') and chatgpt_source()=='proxy':
-        current=reading_current(data.get('quota'),data.get('quota_error'))
+        current=reading_current(data.get('quota'),proxy_quota_error(data))
         for name,used,_ in account_usage(data):
             if used is not None:add('chatgpt-account','ChatGPT 订阅',name,used,None,None,current)
     elif module_enabled('chatgpt'):
@@ -2253,8 +2259,7 @@ def chatgpt_lines(data):
     label=catalog.BY_KEY['chatgpt'].label
     if chatgpt_source()=='proxy':
         usage=account_usage(data);known=[used for _,used,_ in usage if used is not None]
-        error=data.get('healthz_error') if refresh_failed(data.get('healthz_error')) else data.get('quota_error')
-        failed=refresh_failed(error)
+        error=proxy_quota_error(data);failed=refresh_failed(error)
         if not usage:badge='待同步' if ocx_configured() else '未配置'
         elif len(usage)==1:badge=(used_text(usage[0][1]) if usage[0][1] is not None else '额度待同步')+usage[0][2]
         else:badge='已用 '+' · '.join('%s %s%s'%(name,'%g%%'%round(used,1) if used is not None else '—',state) for name,used,state in usage)
