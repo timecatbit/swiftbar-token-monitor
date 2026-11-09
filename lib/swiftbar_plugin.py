@@ -2762,7 +2762,7 @@ ACCOUNT_OPTIONS={'qoder-api':('org','QODER_CN_ORG_ID'),'grok':('team','XAI_TEAM_
 def key_account(provider,entry):
     """Which account a key's figure belongs to, so keys of one account count once in the homepage total.
     Qoder CN and Grok keys name their organization or team. DeepSeek, Kimi and Claude tell no account:
-    such a key is its own ('key', id), which may or may not be another key's account."""
+    such a key counts as its own ('key', id), so two keys of one such account are both added."""
     option,env=ACCOUNT_OPTIONS.get(provider,(None,None))
     owner=str((entry.get('options') or {}).get(option) or (os.environ.get(env,'') if env and entry['id']=='default' else '')).strip()
     return (option,owner) if owner else ('key',entry['id'])
@@ -2776,23 +2776,18 @@ def counted_values(values):
 
 
 def api_badge(values):
-    """Homepage total and its shorter forms: balances or spend are summed per currency and account; otherwise the shared key state.
-    Keys that tell no account may share one, so beside another figure they are listed by name, not summed;
-    where the names don't fit the row the panel shows the bare amounts, then the key count."""
-    if not values:return '未配置',[]
+    """Homepage total: balances or spend summed per currency and account, followed by how many keys it covers
+    when there are several, as "余额 ¥12.00 (3)"; otherwise the shared key state."""
+    if not values:return '未配置'
     for kind,prefix in (('balance','余额 '),('spend','本月已用 ')):
-        rows=counted_values([v for v in values if v.get('kind')==kind])
-        if not rows:continue
-        failed=any(v.get('failed') for v in rows)
-        if len(rows)>1 and any(v['account'][0]=='key' for v in rows):
-            amounts=[money_text(v['amount'],v['currency']) for v in rows]
-            forms=[prefix+' · '.join(v['label']+' '+a for v,a in zip(rows,amounts)),prefix+' · '.join(amounts),'%d 把 Key'%len(values)]
-            return with_failure(forms[0],True,failed),[with_failure(f,True,failed) for f in forms[1:]]
-        totals={}
+        read=[v for v in values if v.get('kind')==kind]
+        if not read:continue
+        rows=counted_values(read);totals={}
         for v in rows:totals[v['currency']]=totals.get(v['currency'],0)+v['amount']
-        return with_failure(prefix+' · '.join(money_text(a,c) for c,a in totals.items()),True,failed),[]
+        count=' (%d)'%len(read) if len(read)>1 else ''
+        return with_failure(prefix+' · '.join(money_text(a,c) for c,a in totals.items())+count,True,any(v.get('failed') for v in rows))
     texts={v['text'] for v in values}
-    return (texts.pop() if len(texts)==1 else '%d 把 Key'%len(values)),[]
+    return texts.pop() if len(texts)==1 else '%d 把 Key'%len(values)
 
 
 def key_lines(provider,entry,data,level):
@@ -2872,8 +2867,7 @@ def api_lines(provider,data):
     service=catalog.BY_KEY[provider];keys,values=api_values(provider,data);first={}
     for entry,value in zip(keys,values):
         if value.get('account'):first.setdefault(value['account'],entry)
-    badge,shorter=api_badge(values)
-    rows=[item(service.label,badge=badge,panelfallback=FALLBACK.join(shorter) or None,**brand_icon(provider))]
+    rows=[item(service.label,badge=api_badge(values),**brand_icon(provider))]
     for entry,value in zip(keys,values):
         same=first.get(value.get('account'))
         # The key reads an organization or team an earlier key already counts; say so where the homepage total would surprise.

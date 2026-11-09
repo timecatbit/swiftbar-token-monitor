@@ -136,7 +136,7 @@ class CatalogTests(unittest.TestCase):
         second=self.add_key('kimi-api','个人','sk-PRIVATE-TWO-123456','中国站')[1]['id']
         data={'kimi-api@'+first:{'balance':10.0,'cash':-1.0,'voucher':11.0,'currency':'CNY','_fetchedAt':self.m.time.time()},'kimi-api@'+second:{'balance':2.5,'currency':'CNY','_fetchedAt':self.m.time.time()}}
         row=self.entry('Kimi API',data)
-        self.assertEqual(row['value'],'余额 工作 ¥10.00 · 个人 ¥2.50')  # Kimi tells no account: listed, not summed.
+        self.assertEqual(row['value'],'余额 ¥12.50 (2)')  # The total, and how many keys it covers.
         keys={c['label']:c for c in row['children'] if c.get('children')}
         self.assertEqual({k:v['value'] for k,v in keys.items()},{'工作':'余额 ¥10.00','个人':'余额 ¥2.50'})
         self.assertEqual([(c['label'],c.get('value')) for c in keys['工作']['children'] if c['label'] in ('现金','代金券')],[('现金','¥-1.00'),('代金券','¥11.00')])
@@ -159,29 +159,27 @@ class CatalogTests(unittest.TestCase):
         a,b,c=keys('qoder-api',{'org':'org1'},{'org':'org1'},{'org':'org2'})
         data={'qoder-api@'+a:{'balance':100.0,'currency':'Credits','_fetchedAt':now-60},'qoder-api@'+b:{'balance':90.0,'currency':'Credits','_fetchedAt':now}}
         row=self.entry('Qoder CN API',data)
-        self.assertEqual(row['value'],'余额 90 Credits')  # One organization, its freshest reading.
+        self.assertEqual(row['value'],'余额 90 Credits (2)')  # One organization, its freshest reading.
         children={k['label']:k for k in row['children'] if k.get('children')}
         self.assertEqual(children['K1']['detail'],'与「K0」同一组织，主页合计只算一次');self.assertNotIn('detail',children['K0'])
         data['qoder-api@'+c]={'balance':40.0,'currency':'Credits','_fetchedAt':now}
-        self.assertEqual(self.entry('Qoder CN API',data)['value'],'余额 130 Credits')
+        self.assertEqual(self.entry('Qoder CN API',data)['value'],'余额 130 Credits (3)')
         with patch.dict(os.environ,{'QODER_CN_API_KEY':'sk-PRIVATE-ENV-1234567890','QODER_CN_ORG_ID':'org2'}):
             data['qoder-api']={'balance':40.0,'currency':'Credits','_fetchedAt':now}
-            self.assertEqual(self.entry('Qoder CN API',data)['value'],'余额 130 Credits')  # The default key names org2 too.
-        # Kimi tells no account. One account read a moment apart, or two accounts that happen to agree, look
-        # alike, so keys are neither summed nor merged by their readings; a lone figure is still the total.
+            self.assertEqual(self.entry('Qoder CN API',data)['value'],'余额 130 Credits (4)')  # The default key names org2 too.
+        # Kimi tells no account, so each key is added as its own, even when two readings agree.
         x,y=keys('kimi-api',{'region':'china'},{'region':'china'})
         same={'balance':100.0,'currency':'CNY','_fetchedAt':now}
-        listed=self.entry('Kimi API',{'kimi-api@'+x:same,'kimi-api@'+y:dict(same,balance=99.99)})
-        self.assertEqual(listed['value'],'余额 K0 ¥100.00 · K1 ¥99.99')
-        # Where the names don't fit the row, the panel shows the bare amounts, then the key count.
-        self.assertEqual(listed['fallbacks'],['余额 ¥100.00 · ¥99.99','2 把 Key'])
+        self.assertEqual(self.entry('Kimi API',{'kimi-api@'+x:same,'kimi-api@'+y:dict(same,balance=99.99)})['value'],'余额 ¥199.99 (2)')
         failed=self.entry('Kimi API',{'kimi-api@'+x:same,'kimi-api@'+y:dict(same,balance=99.99),'kimi-api@'+y+'_error':(0,'超时',None)})
-        self.assertEqual(failed['fallbacks'],['余额 ¥100.00 · ¥99.99 · 刷新失败','2 把 Key · 刷新失败'])
+        self.assertEqual(failed['value'],'余额 ¥199.99 (2) · 刷新失败')
         row=self.entry('Kimi API',{'kimi-api@'+x:same,'kimi-api@'+y:dict(same)})
-        self.assertEqual(row['value'],'余额 K0 ¥100.00 · K1 ¥100.00')
+        self.assertEqual(row['value'],'余额 ¥200.00 (2)');self.assertNotIn('fallbacks',row)
         self.assertFalse(any(k.get('detail') for k in row['children'] if k.get('children')))
-        alone=self.entry('Kimi API',{'kimi-api@'+x:same})
-        self.assertEqual(alone['value'],'余额 ¥100.00');self.assertNotIn('fallbacks',alone)
+        # A key without a reading yet isn't counted; a lone figure has no count.
+        self.assertEqual(self.entry('Kimi API',{'kimi-api@'+x:same})['value'],'余额 ¥100.00')
+        dollars={'kimi-api@'+x:same,'kimi-api@'+y:dict(same,balance=5.0,currency='USD')}
+        self.assertEqual(self.entry('Kimi API',dollars)['value'],'余额 ¥100.00 · $5.00 (2)')
     def test_a_key_already_added_is_refused(self):
         scripts=[]
         def answers(*replies):
