@@ -521,12 +521,13 @@ final class DashboardView:FlippedView {
         NSGraphicsContext.current?.cgContext.translateBy(x:0,y:Self.chartExtra(data))
         let observed=max(totals.max() ?? 0,1),unit=pow(10,floor(log10(observed)))
         let ceiling=ceil(observed*1.08/unit*2)/2*unit
-        let plot=NSRect(x:left+32,y:119,width:width-36,height:78)
-        let cardFrame=NSRect(x:left+27,y:111,width:width-27,height:90),card=NSBezierPath(roundedRect:cardFrame,xRadius:7,yRadius:7)
+        // The card spans the same edges as the figures and legend above; the axis labels sit inside it.
+        let plot=NSRect(x:left+34,y:119,width:width-40,height:78)
+        let cardFrame=NSRect(x:left,y:111,width:width,height:90),card=NSBezierPath(roundedRect:cardFrame,xRadius:7,yRadius:7)
         totalColor.withAlphaComponent(dark(self) ? 0.035 : 0.025).setFill();card.fill()
         for f in [CGFloat(0),0.5,1]{
             let yy=plot.maxY-f*plot.height
-            text(axisTokens(ceiling*Double(f)),x:left-2,y:yy-5,w:27,size:8,color:.secondaryLabelColor,align:.right,numeric:true)
+            text(axisTokens(ceiling*Double(f)),x:left+4,y:yy-5,w:26,size:8,color:.secondaryLabelColor,align:.right,numeric:true)
             line(NSPoint(x:plot.minX,y:yy),NSPoint(x:plot.maxX,y:yy),color:NSColor.separatorColor.withAlphaComponent(0.22),width:0.5)
         }
         // Partial data and when the figures were read share a faint note in the card's top-right corner, above the top grid line.
