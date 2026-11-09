@@ -140,17 +140,19 @@ expect(usageColor("warning")==NSColor.systemOrange,"High usage uses system orang
 expect(usageColor("critical")==NSColor.systemRed,"Critical usage uses system red")
 expect(usageColor(nil)==nil,"Stale or missing usage keeps its neutral state")
 // Hover follows the pointer: the delay counts from entering a row, not from the last movement.
+// Which closure fires tells whether a delay restarted, so each step waits for its firing instead of a
+// fixed time that a busy CI machine can overrun.
 let intent=HoverIntent();intent.delay=0.2;var fired:[String]=[]
+func awaitFired(_ count:Int){let deadline=Date().addingTimeInterval(2);while fired.count<count && Date()<deadline{RunLoop.main.run(until:Date().addingTimeInterval(0.02))}}
 intent.schedule("0:a"){fired.append("a")}
-RunLoop.main.run(until:Date().addingTimeInterval(0.12))
 intent.schedule("0:a"){fired.append("a-restarted")}
-RunLoop.main.run(until:Date().addingTimeInterval(0.12))
+awaitFired(1)
 expect(fired==["a"],"Moving inside a row must not restart its hover delay")
 intent.schedule("0:b"){fired.append("b")};intent.schedule("0:c"){fired.append("c")}
-RunLoop.main.run(until:Date().addingTimeInterval(0.3))
+awaitFired(2)
 expect(fired==["a","c"],"Only the row the pointer reached last may open")
 intent.schedule("0:a"){fired.append("a-again")}
-RunLoop.main.run(until:Date().addingTimeInterval(0.3))
+awaitFired(3)
 expect(fired.last=="a-again","Returning to a row after its flyout opened schedules it again")
 intent.schedule("0:b"){fired.append("cancelled")};intent.cancel()
 RunLoop.main.run(until:Date().addingTimeInterval(0.3))
