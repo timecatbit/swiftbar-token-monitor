@@ -217,9 +217,7 @@ def default_ready(key):
     if key=='deepseek':
         if os.environ.get('DEEPSEEK_API_KEY') or os.environ.get('DEEPSEEK_API_KEY_FILE'):
             return bool(accounts.credential('DEEPSEEK_API_KEY'))
-        config=discovery.read_object(CONFIG_FILE);providers=config.get('providers') or {}
-        provider=providers.get('deepseek') if isinstance(providers,dict) else {}
-        return bool(isinstance(provider,dict) and provider.get('apiKey') and str(provider.get('baseUrl') or '').rstrip('/') in ('https://api.deepseek.com','https://api.deepseek.com/v1'))
+        return bool(opencodex_deepseek_key())
     if key=='komari':return bool(KOMARI_BASE_URL)
     if key=='grok':return bool(accounts.credential('XAI_MANAGEMENT_API_KEY') and os.environ.get('XAI_TEAM_ID','').strip())
     if key=='minimax':return bool(accounts.credential('MINIMAX_API_KEY'))
@@ -227,6 +225,14 @@ def default_ready(key):
     if key=='qoder-api':return bool(accounts.credential('QODER_CN_API_KEY') and os.environ.get('QODER_CN_ORG_ID','').strip())
     if key=='claude-api':return bool(accounts.credential('ANTHROPIC_API_KEY'))
     return False
+
+
+def opencodex_deepseek_key():
+    """The DeepSeek key in OpenCodex's own config, when that provider points at the official API."""
+    config=discovery.read_object(CONFIG_FILE);providers=config.get('providers') or {}
+    provider=providers.get('deepseek') if isinstance(providers,dict) else {}
+    if not isinstance(provider,dict) or str(provider.get('baseUrl') or '').rstrip('/') not in ('https://api.deepseek.com','https://api.deepseek.com/v1'):return ''
+    return str(provider.get('apiKey') or '').strip()
 
 
 def refresh_ttl(base):
@@ -2542,6 +2548,10 @@ def configure_connection(key,clear=False):
         values[names[key][1]]=filename
         option=ask_option(key,os.environ.get({'grok':'XAI_TEAM_ID','qoder-api':'QODER_CN_ORG_ID'}.get(key,''),''))
         if option is None:return
+        try:
+            with open(filename,encoding='utf-8') as handle:chosen=handle.read().strip()
+        except (OSError,ValueError):chosen=''
+        if refuse_repeated(key,chosen,{'grok':{'team':option},'qoder-api':{'org':option}}.get(key,{}),named_keys(key)):return
         if option:values[names[key][2]]=option
     previous=[os.environ.get(name,'') for name in names[key] if name.endswith('_FILE')]
     connections.write_overrides(STATE_DIR,values)
@@ -2575,10 +2585,20 @@ def add_api_key(provider):
     option=ask_option(provider)
     if option is None:return
     options={'grok':{'team':option},'kimi-api':{'region':option},'qoder-api':{'org':option}}.get(provider,{})
+    if refuse_repeated(provider,secret,options):return
     key_id=keystore.add(STATE_DIR,provider,name,secret,options)
     preferences.update(STATE_DIR,'module',provider,'true')
     if provider in accounts.KEY_CHECKS:test_api_key(provider,key_id)
     schedule_background_refresh()
+
+
+def refuse_repeated(provider,secret,options,keys=None):
+    """A key already here isn't added again: the same secret and, for Grok and Qoder CN, the same team or organization."""
+    account=key_account(provider,{'id':'new','options':options})
+    same=next((e for e in (api_keys(provider) if keys is None else keys)
+               if secret and entry_secret(provider,e['id'])==secret and (account[0]=='key' or key_account(provider,e)==account)),None)
+    if same:applescript('display alert "这把 Key 已经添加过" message '+as_literal('与「'+same['label']+'」是同一把 Key，不再重复添加。'))
+    return bool(same)
 
 
 def rename_api_key(provider,key_id):
@@ -2682,6 +2702,7 @@ def api_keys(provider):
 
 def entry_secret(provider,key_id):
     if key_id!='default':return keystore.secret(STATE_DIR,provider,key_id)
+    if provider=='deepseek' and not (os.environ.get('DEEPSEEK_API_KEY') or os.environ.get('DEEPSEEK_API_KEY_FILE')):return opencodex_deepseek_key()
     return next((value for value in (accounts.credential(name) for name in catalog.credential_names(provider)) if value),'')
 
 

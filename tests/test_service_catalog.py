@@ -182,6 +182,36 @@ class CatalogTests(unittest.TestCase):
         self.assertFalse(any(k.get('detail') for k in row['children'] if k.get('children')))
         alone=self.entry('Kimi API',{'kimi-api@'+x:same})
         self.assertEqual(alone['value'],'余额 ¥100.00');self.assertNotIn('fallbacks',alone)
+    def test_a_key_already_added_is_refused(self):
+        scripts=[]
+        def answers(*replies):
+            replies=iter(replies)
+            def run(script):
+                scripts.append(script)
+                reply=next(replies,'')
+                return types.SimpleNamespace(returncode=0 if reply is not None else 1,stdout=reply or '')
+            return patch.object(self.m,'applescript',side_effect=run)
+        def add(provider,*replies):
+            with answers(*replies),patch.object(self.m,'schedule_background_refresh'):self.m.run_action('add-api-key',[provider])
+            return [e['label'] for e in self.m.keystore.entries(self.m.STATE_DIR,provider)]
+        self.assertEqual(add('kimi-api','工作','sk-PRIVATE-SAME-123456','中国站'),['工作'])
+        scripts.clear()
+        self.assertEqual(add('kimi-api','重复','sk-PRIVATE-SAME-123456','国际站'),['工作'])
+        self.assertIn('这把 Key 已经添加过',scripts[-1]);self.assertIn('与「工作」是同一把 Key',scripts[-1])
+        self.assertNotIn('PRIVATE',scripts[-1])
+        # The classic connection counts too.
+        with patch.dict(os.environ,{'MOONSHOT_API_KEY':'sk-PRIVATE-ENV-1234567'}):
+            self.assertEqual(add('kimi-api','又一把','sk-PRIVATE-ENV-1234567','中国站'),['工作'])
+        # One xAI management key may read several teams; the same key and team is the repeat.
+        self.assertEqual(add('grok','A','xai-PRIVATE-MGMT-123456','team-a'),['A'])
+        self.assertEqual(add('grok','B','xai-PRIVATE-MGMT-123456','team-b'),['A','B'])
+        self.assertEqual(add('grok','C','xai-PRIVATE-MGMT-123456','team-a'),['A','B'])
+        # Choosing a key file for the classic connection that repeats a named key writes nothing.
+        chosen=self.root/'kimi-key';chosen.write_text('sk-PRIVATE-SAME-123456\n')
+        with answers(str(chosen),'中国站'),patch.object(self.m,'schedule_background_refresh'):
+            self.m.run_action('configure-connection',['kimi-api'])
+        self.assertIn('这把 Key 已经添加过',scripts[-1])
+        self.assertFalse((Path(self.m.STATE_DIR)/'config.local.sh').exists())
     def test_classic_key_file_stays_the_default_and_user_files_are_never_deleted(self):
         legacy=Path(self.m.STATE_DIR)/'keys'/'openai_api_key.key';legacy.parent.mkdir(parents=True);legacy.write_text('sk-OLD-TYPED-COPY')
         chosen=self.root/'my-openai-key';chosen.write_text('sk-USER-OWNED-FILE')
