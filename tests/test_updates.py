@@ -106,6 +106,11 @@ class UpdateTests(unittest.TestCase):
   self.m.set_self_update_state(status='failed',version='99.0.0',reason='安装包校验失败')
   rows='\n'.join(self.m.self_update_lines(data))
   self.assertIn('安装包校验失败',rows);self.assertIn('重试更新到 99.0.0',rows)
+  # Opening the row doesn't ask GitHub again; the release check stays at once every 6 hours.
+  self.m.write_json_cache(self.m.cache_path('self_update'),{'schema':1,'fetchedAt':time.time(),'payload':data['self_update']})
+  row=next(e for e in self.m.resource_panel_entries(self.m.cached_data()) if e['label']==self.m.PRODUCT)
+  self.assertNotIn('onOpenAction',row)
+  with self.assertRaises(ValueError):self.m.refresh_resource('self-update')
  def test_update_menu_prioritizes_new_versions_and_preserves_actions(self):
   rows=[{'id':key,'name':name,'status':status,'available':available,'href':'https://example.test/'+key,'current':'1.0','latest':'2.0'} for key,name,status,available in [
    ('opencodex','OpenCodex','自动更新已开启 · 已是最新',False),

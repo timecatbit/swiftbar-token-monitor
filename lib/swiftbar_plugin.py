@@ -1763,7 +1763,7 @@ def named_key_loaders():
 
 
 # Only these visible resources can request an immediate read from a flyout.
-RESOURCE_CACHES={'deepseek':'provider_quotas','chatgpt':'chatgpt','grok':'grok','minimax':'minimax','kimi-api':'kimi-api','qoder-api':'qoder-api','claude-api':'claude-api','komari':'komari','updates':'app_updates','claude-subscription':'claude_subscription','qoder-subscription':'qoder_subscription','opencodex':'opencodex','self-update':'self_update'}
+RESOURCE_CACHES={'deepseek':'provider_quotas','chatgpt':'chatgpt','grok':'grok','minimax':'minimax','kimi-api':'kimi-api','qoder-api':'qoder-api','claude-api':'claude-api','komari':'komari','updates':'app_updates','claude-subscription':'claude_subscription','qoder-subscription':'qoder_subscription','opencodex':'opencodex'}
 
 def resource_cache_names(source,loaders):
     if source=='opencodex':
@@ -1776,7 +1776,7 @@ def resource_cache_names(source,loaders):
     return [key for key in loaders if key==name or key.startswith(source+'@')] if name else []
 
 def refresh_resource(source):
-    if source not in RESOURCE_CACHES or (source!='self-update' and not module_enabled(source)):raise ValueError('invalid resource')
+    if source not in RESOURCE_CACHES or not module_enabled(source):raise ValueError('invalid resource')
     names=resource_cache_names(source,external_loaders())
     if not names:return
     checks=read_cache('resource-checks');now=time.time();last=checks.get(source,0)
@@ -3075,7 +3075,7 @@ def resource_panel_entries(data):
         if entry.get('separator'):continue
         label=entry['label'];service=services.get(label)
         source=service.key if service else ('komari' if label.startswith('Komari 监控') else 'updates' if label=='Harness 更新'
-            else 'opencodex' if label.startswith('OpenCodex 管理') else 'self-update' if label==PRODUCT else None)
+            else 'opencodex' if label.startswith('OpenCodex 管理') else None)
         if entry.get('children') and resource_cache_names(source,loaders):
             entry['onOpenAction']=['refresh-source',source]
         # Refresh sits beside Summary; SwiftBar's own submenu covers its housekeeping.
