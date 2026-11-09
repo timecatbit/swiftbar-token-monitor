@@ -10,6 +10,9 @@
 # <swiftbar.hideAbout>true</swiftbar.hideAbout>
 # <swiftbar.hideDisablePlugin>true</swiftbar.hideDisablePlugin>
 # <swiftbar.hideLastUpdated>true</swiftbar.hideLastUpdated>
+# SwiftBar 按 schedule 每分钟运行，忽略文件名里的 30s（保留它只为兼容 xbar 和已安装的路径）：
+# 按文件名间隔刷新的插件，锁屏或睡眠期间错过两次刷新，SwiftBar 就在星星旁画 ⚠️；按 schedule 运行的不做这项检查。
+# <swiftbar.schedule>* * * * *</swiftbar.schedule>
 #
 # 可调环境变量（取消注释即可覆盖）：
 #   OCX_BASE_URL     管理地址，默认 http://127.0.0.1:10100

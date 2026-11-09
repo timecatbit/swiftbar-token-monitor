@@ -54,6 +54,9 @@ class PanelTests(unittest.TestCase):
    depth=len(line)-len(line.lstrip('-'));opens=i+1<len(rows) and len(rows[i+1])-len(rows[i+1].lstrip('-'))>depth and not set(rows[i+1])<={'-'}
    self.assertTrue(opens or any(k in line for k in ('href=','bash=','refresh=true')),line[:60])
   self.assertIn('<swiftbar.hideAbout>true</swiftbar.hideAbout>',SOURCE.read_text())
+ def test_entry_runs_on_a_schedule_so_swiftbar_draws_no_stale_mark(self):
+  # SwiftBar marks interval plugins stale (⚠️ beside the star) after a locked screen; scheduled ones it never does.
+  self.assertRegex(SOURCE.read_text(),r'(?m)^# <swiftbar\.schedule>\* \* \* \* \*</swiftbar\.schedule>$')
  def test_menu_hierarchy_and_callback_spaces(self):
   lines=['账户管理 | sfimage=person.crop.circle','--切换 main | bash=/bin/bash param1="/tmp/path with spaces/plugin.sh" param2=--action param3=account-use param4="account one"','---','服务器监控 · 1/1 在线 | sfimage=server.rack','--● node  在线 · 长期 | href=https://example.test tooltip="在线 · CPU 1% · 内存 20%"']
   nodes=self.m.panel_entries(lines)
