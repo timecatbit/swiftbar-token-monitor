@@ -336,7 +336,7 @@ final class DashboardView:FlippedView {
     }
     // The dashboard is always 344pt wide, so the legend gets 320pt between the margins.
     static func chartExtra(_ d:Dashboard)->CGFloat {CGFloat(max(0,legendLayout(legendLabels(d),width:320).count-1))*17}
-    static func summaryHeight(_ d:Dashboard)->CGFloat {d.showSummary==false ? 44 : 222+chartExtra(d)}
+    static func summaryHeight(_ d:Dashboard)->CGFloat {d.showSummary==false ? 44 : 230+chartExtra(d)}
     static func harnessHeaderHeight(_ d:Dashboard)->CGFloat {d.providers.isEmpty || d.showSummary==false ? 0 : 6}
     static func height(_ d:Dashboard)->CGFloat {summaryHeight(d)+harnessHeaderHeight(d)+d.providers.reduce(0){$0+providerHeight($1,d)}+(d.providers.isEmpty ? 0 : 4)}
     init(_ data:Dashboard,width:CGFloat){
@@ -521,22 +521,25 @@ final class DashboardView:FlippedView {
         NSGraphicsContext.current?.cgContext.translateBy(x:0,y:Self.chartExtra(data))
         let observed=max(totals.max() ?? 0,1),unit=pow(10,floor(log10(observed)))
         let ceiling=ceil(observed*1.08/unit*2)/2*unit
-        let plot=NSRect(x:left+32,y:119,width:width-36,height:78)
-        let cardFrame=NSRect(x:left+27,y:111,width:width-27,height:90),card=NSBezierPath(roundedRect:cardFrame,xRadius:7,yRadius:7)
+        // The chart's text keeps to the same edges as the figures above: axis labels flush left, the card
+        // right after the widest of them, and the note and last time label flush right.
+        let axis=[CGFloat(0),0.5,1].map{axisTokens(ceiling*Double($0))},axisFont=NSFont.monospacedDigitSystemFont(ofSize:8,weight:.regular)
+        let axisWidth=axis.map{ceil(($0 as NSString).size(withAttributes:[.font:axisFont]).width)}.max() ?? 0
+        let cardFrame=NSRect(x:left+axisWidth+5,y:119,width:right-left-axisWidth-5,height:90),card=NSBezierPath(roundedRect:cardFrame,xRadius:7,yRadius:7)
+        let plot=NSRect(x:cardFrame.minX+5,y:127,width:cardFrame.width-9,height:78)
         totalColor.withAlphaComponent(dark(self) ? 0.035 : 0.025).setFill();card.fill()
-        for f in [CGFloat(0),0.5,1]{
+        for (f,label) in zip([CGFloat(0),0.5,1],axis){
             let yy=plot.maxY-f*plot.height
-            // The chart's text keeps to the same edges as the figures above: axis labels flush left.
-            text(axisTokens(ceiling*Double(f)),x:left,y:yy-5,w:25,size:8,color:.secondaryLabelColor,numeric:true)
+            text(label,x:left,y:yy-5,w:axisWidth+1,size:8,color:.secondaryLabelColor,numeric:true)
             line(NSPoint(x:plot.minX,y:yy),NSPoint(x:plot.maxX,y:yy),color:NSColor.separatorColor.withAlphaComponent(0.22),width:0.5)
         }
-        // Partial data and when the figures were read share a faint note in the card's top-right corner, above the top grid line.
+        // Partial data and when the figures were read share a faint note just above the card, clear of its edge.
         let note=[data.chartStatus,data.updated ?? ""].filter{!$0.isEmpty}.joined(separator:" · ")
-        if !note.isEmpty {text(note,x:cardFrame.minX+6,y:plot.minY-11,w:right-cardFrame.minX-6,size:7.5,color:.tertiaryLabelColor,align:.right)}
+        if !note.isEmpty {text(note,x:cardFrame.minX,y:cardFrame.minY-12,w:cardFrame.width,size:7.5,color:.tertiaryLabelColor,align:.right)}
         if n==1 {
             for (i,values) in series.enumerated(){let y=plot.maxY-CGFloat(values[0]/ceiling)*plot.height;accent(summaryProviders[i].id,self).setFill();NSBezierPath(ovalIn:NSRect(x:plot.midX-2.5,y:y-2.5,width:5,height:5)).fill()}
             let y=plot.maxY-CGFloat(totals[0]/ceiling)*plot.height;totalColor.setFill();NSBezierPath(ovalIn:NSRect(x:plot.midX-3,y:y-3,width:6,height:6)).fill()
-            text(data.dates[0],x:plot.midX-30,y:204,w:60,size:8.5,color:.secondaryLabelColor,align:.center);return
+            text(data.dates[0],x:plot.midX-30,y:212,w:60,size:8.5,color:.secondaryLabelColor,align:.center);return
         }
         let positions=Self.chartPositions(data)
         let paths=Self.smoothCurves(series,positions:positions,plot:plot,ceiling:ceiling),totalPath=paths.last!
@@ -549,7 +552,7 @@ final class DashboardView:FlippedView {
         }
         let middle=(1..<n-1).filter{positions[$0]>=0.25 && positions[$0]<=0.75}.min{abs(positions[$0]-0.5)<abs(positions[$1]-0.5)}
         let labelIndices=[0]+(middle.map{[$0]} ?? [])+[n-1]
-        for i in labelIndices{let label=data.dates[i];let x=plot.minX+CGFloat(positions[i])*plot.width;text(label,x:i==0 ? x : (i==n-1 ? right-48 : x-25),y:204,w:i==n-1 ? 48 : 50,size:8.5,color:.secondaryLabelColor,align:i==0 ? .left : (i==n-1 ? .right : .center))}
+        for i in labelIndices{let label=data.dates[i];let x=plot.minX+CGFloat(positions[i])*plot.width;text(label,x:i==0 ? x : (i==n-1 ? right-48 : x-25),y:212,w:i==n-1 ? 48 : 50,size:8.5,color:.secondaryLabelColor,align:i==0 ? .left : (i==n-1 ? .right : .center))}
     }
 
 }
