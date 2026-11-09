@@ -3073,8 +3073,14 @@ def dashboard_payload(data):
     chart_status=('数据暂不可用' if refresh_failed(data.get('range_usage_error')) else '待同步') if not bundle else ('部分图表数据不可用' if any(p.get('error') or p.get('chartUnavailable') for p in usage_sources) else '')
     if any(p.get('historyTruncated') or p.get('entriesTruncated') for p in usage_sources):chart_status='仅含现有记录'
     if key=='all' and any(number(p.get('summary',{}).get('requests'))>sum(number(day.get('requests')) for day in p.get('days',[])) for p in usage_sources):chart_status='图表展示最近 366 天'
+    # The Summary adds every shown source, so its time is the oldest of their last good reads.
+    reads=[r for r in (u.get('readAt') or bundle.get('_fetchedAt') for u in usage_sources if u.get('summary')) if r]
+    updated=''
+    if reads:
+        read=datetime.fromtimestamp(min(reads),now.tzinfo)
+        updated='更新时间：'+read.strftime('%H:%M' if read.date()==now.date() else '%m/%d %H:%M')
     return {'date':now.date().isoformat(),'dates':labels,'providers':providers,'rangeKey':key,'rangeLabel':RANGES[key],
-            'chartUnit':unit,'chartSpan':span,'chartStatus':chart_status,'chartPositions':chart_positions,
+            'chartUnit':unit,'chartSpan':span,'chartStatus':chart_status,'updated':updated,'chartPositions':chart_positions,
             'showSummary':module_enabled('summary'),'allowCollapse':view_settings()['allowCollapse'],'expandedProviders':view_settings()['expandedProviders']}
 
 

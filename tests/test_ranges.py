@@ -36,6 +36,18 @@ class RangeTests(unittest.TestCase):
   d=self.m.dashboard_payload({'range_usage':{'range':'today','claude':{'summary':{'requests':100,'totalTokens':1000}}}})
   self.assertEqual(d['rangeKey'],'30d');self.assertEqual(d['chartStatus'],'待同步')
   self.assertTrue(all(not p['available'] for p in d['providers']))
+ def test_summary_time_is_the_oldest_good_read_of_the_shown_sources(self):
+  at=lambda hour,minute:self.now.replace(hour=hour,minute=minute).timestamp()
+  bundle={'range':'today','_fetchedAt':at(11,58),'claude':{'summary':{'requests':1,'totalTokens':10},'readAt':at(11,58)},
+          'opencodex':{'summary':{'requests':1,'totalTokens':10},'readAt':at(11,43),'refreshError':'OpenCodex 用量读取失败'}}
+  with patch.object(self.m,'usage_now',return_value=self.now):
+   self.assertEqual(self.m.dashboard_payload({'range_usage':bundle})['updated'],'更新时间：11:43')
+   bundle['opencodex']={'error':'未配置 OpenCodex'}  # A source with no figures doesn't hold the time back.
+   self.assertEqual(self.m.dashboard_payload({'range_usage':bundle})['updated'],'更新时间：11:58')
+   bundle['claude'].pop('readAt')  # Bundles written before sources kept their own time use the bundle's.
+   bundle['_fetchedAt']=at(11,58)-86400
+   self.assertEqual(self.m.dashboard_payload({'range_usage':bundle})['updated'],'更新时间：11/03 11:58')
+   self.assertEqual(self.m.dashboard_payload({})['updated'],'')
  def test_uncached_range_keeps_previous_chart_and_selection_until_ready(self):
   def store(range_key,requests):
    self.m.write_json_cache(self.m.cache_path(self.m.range_cache_name(range_key)),{
