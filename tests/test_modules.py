@@ -94,6 +94,31 @@ class ModuleTests(unittest.TestCase):
             bundle,error=self.m.range_usage_cached()
         self.assertEqual(bundle['codex']['summary']['totalTokens'],42)
         local.assert_called_once();remote.assert_not_called()
+    def test_a_failed_harness_read_keeps_the_time_of_its_last_good_read(self):
+        for key in preferences.USAGE:self.toggle(key,key=='opencodex')
+        clock=[self.m.time.time()]
+        def read(result):
+            with patch.object(self.m.time,'time',side_effect=lambda:clock[0]),patch.object(self.m,'ocx_configured',return_value=True), \
+                 patch.object(self.m,'ocx_range_usage',**result),patch.object(self.m.subprocess,'run'):
+                return self.m.range_usage_cached()
+        read({'return_value':{'summary':{'totalTokens':42,'requests':1}}})
+        clock[0]+=15*60
+        bundle,error=read({'side_effect':RuntimeError('OpenCodex 用量读取失败')})
+        self.assertIsNone(error);self.assertTrue(bundle['opencodex']['refreshError'])
+        self.assertEqual(bundle['opencodex']['summary']['totalTokens'],42)
+        data={'healthz':{'version':'test'},'range_usage':bundle}
+        with patch.object(self.m.time,'time',return_value=clock[0]):
+            rows='\n'.join(self.m.management_lines(data))
+        self.assertIn('15 分钟前更新 · 本次读取失败',rows);self.assertNotIn('刚刚更新',rows)
+        clock[0]+=6*60  # Failing again keeps the same good-read time.
+        bundle,error=read({'side_effect':RuntimeError('OpenCodex 用量读取失败')})
+        with patch.object(self.m.time,'time',return_value=clock[0]):
+            self.assertIn('21 分钟前更新 · 本次读取失败','\n'.join(self.m.management_lines(dict(data,range_usage=bundle))))
+        clock[0]+=15*60
+        bundle,error=read({'return_value':{'summary':{'totalTokens':50,'requests':2}}})
+        with patch.object(self.m.time,'time',return_value=clock[0]):
+            rows='\n'.join(self.m.management_lines(dict(data,range_usage=bundle)))
+        self.assertIn('刚刚更新',rows);self.assertNotIn('读取失败',rows)
     def test_menu_has_checkmarks_and_restore_even_if_all_hidden(self):
         for key in preferences.KNOWN:self.toggle(key,False)
         choices=self.m.module_options()

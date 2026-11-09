@@ -1700,12 +1700,16 @@ def range_usage_cached():
                 return sources.jsonl_usage(source,root,CACHE_DIR,start,end,now.tzinfo,'opencodex' in enabled,proxy_log)
             except Exception:return {'error':'记录暂不可用'}
         bundle={'range':key,'start':start,'end':end}
-        previous=read_cache(name).get('payload') or {}
+        record=read_cache(name);previous=record.get('payload') or {}
         with ThreadPoolExecutor(max_workers=max(1,len(enabled))) as pool:
             pending={source:pool.submit(collect,source) for source in enabled}
             for source,future in pending.items():
                 result=future.result();last=previous.get(source) or {}
-                bundle[source]=dict(last,refreshError=result['error']) if result.get('error') and last.get('summary') else result
+                # The bundle is rewritten on every read, so each source keeps the time of its own last good read;
+                # figures kept after a failure must not look just updated.
+                if result.get('error') and last.get('summary'):
+                    bundle[source]=dict(last,refreshError=result['error'],readAt=last.get('readAt') or record.get('fetchedAt'))
+                else:bundle[source]=result if result.get('error') else dict(result,readAt=time.time())
         return bundle,None
     return cached_fetch(name,load,refresh_ttl(60))
 
@@ -2229,13 +2233,15 @@ def unfiltered_management_lines(data):
                          item('查看 ocx status',sfimage='terminal',**act('status'))])
     if healthy:
         children.extend(['---',item('数据更新时间',panelsection=True,color=MUTED,size=11)])
-        # The homepage reads the selected range bundle, so report that bundle's age.
+        # The homepage reads the selected range bundle; OpenCodex's part of it carries when it was last read.
         usage=data.get('range_usage') or {}
         ocx_usage=usage.get('opencodex') or {}
-        for label,payload,error in [('用量统计 · '+RANGES.get(usage.get('range') or selected_range(),''),usage,data.get('range_usage_error') or ocx_usage.get('refreshError') or ocx_usage.get('error')),
+        ocx_read={'_fetchedAt':ocx_usage.get('readAt') or (usage.get('_fetchedAt') if ocx_usage.get('summary') else None)}
+        for label,payload,error in [('用量统计 · '+RANGES.get(usage.get('range') or selected_range(),''),ocx_read,data.get('range_usage_error') or ocx_usage.get('refreshError') or ocx_usage.get('error')),
                                     ('供应商余额',data.get('provider_quotas') or {},data.get('provider_quotas_error'))]:
             status=freshness(payload)
-            if error and (not isinstance(error,(list,tuple)) or refresh_failed(error)):status+=' · 读取失败'
+            if error and (not isinstance(error,(list,tuple)) or refresh_failed(error)):
+                status=status+' · 本次读取失败' if payload.get('_fetchedAt') else '读取失败'
             children.append(item(label,badge=status,color=MUTED,size=11))
     lines.extend(nest(children));lines.extend(komari_lines(data));lines.extend(app_update_lines(data));lines.extend(self_update_lines(data));lines.append('---')
     lines.append(item('刷新数据',sfimage='arrow.clockwise',**act('refresh')))
