@@ -11,7 +11,7 @@ MODULES = (
     ('summary', 'Summary', '概览'),
     ('opencodex', 'OpenCodex', 'Harness'),
     ('claude', 'Claude', 'Harness'),
-    ('codex', 'ChatGPT 本机用量', 'Harness'),
+    ('codex', 'ChatGPT', 'Harness'),
     ('opencode', 'OpenCode', 'Harness'),
     ('deepseek-harness', 'DeepSeek Harness', 'Harness'),
     ('workbuddy', 'WorkBuddy', 'Harness'),

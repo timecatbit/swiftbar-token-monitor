@@ -253,7 +253,7 @@ class ModuleTests(unittest.TestCase):
             self.m.run_action('detect-modules',[])
         self.assertEqual(target.read_bytes(),before);refresh.assert_not_called()
         message,detail=confirm.call_args.args
-        self.assertIn('覆盖当前模块选择',message);self.assertIn('将启用：ChatGPT 本机用量',detail)
+        self.assertIn('覆盖当前模块选择',message);self.assertIn('将启用：ChatGPT\n',detail)
         self.assertIn('将取消：OpenCodex',detail);self.assertEqual(confirm.call_args.kwargs['accept'],'覆盖当前选项')
     def test_detection_explicit_confirmation_replaces_selection_only(self):
         preferences.update(self.m.STATE_DIR,'appearance','solid')

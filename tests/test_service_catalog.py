@@ -26,7 +26,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual([s.brand for s in catalog.SERVICES if s.category=='API'],['ChatGPT','Claude','DeepSeek','MiniMax','Gemini','Grok','Kimi','Qoder CN'])
         self.assertEqual(len(catalog.BY_KEY),15)
         self.assertNotIn('codex-quota',preferences.KNOWN)
-        self.assertEqual(next(label for k,label,g in preferences.MODULES if k=='codex'),'ChatGPT 本机用量')
+        self.assertEqual(next(label for k,label,g in preferences.MODULES if k=='codex'),'ChatGPT')
     def test_upgrade_retains_proxy_source_and_other_preferences(self):
         path=Path(self.m.STATE_DIR);path.mkdir()
         original={'schema':1,'visible':['summary','codex-quota','claude'],'appearance':'solid','expandedProviders':['claude'],'paths':{'claude':'/chosen/records'}}

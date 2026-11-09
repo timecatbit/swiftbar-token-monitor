@@ -107,7 +107,7 @@ expect(DashboardView.harnessHeaderHeight(grouped)==0,"Hidden Summary uses the ti
 expect(MenuLayout.configured("已配置")==true,"Configured gets a filled indicator")
 expect(MenuLayout.configured("未配置")==false,"Unconfigured gets an outline indicator")
 expect(MenuLayout.configured("已同步")==nil,"Connection results must not be confused with configuration")
-let configuredEntry=try JSONDecoder().decode(Entry.self,from:Data("{\"label\":\"ChatGPT 本机用量\",\"value\":\"已配置\",\"symbol\":\"folder\",\"children\":[{\"label\":\"目录\",\"children\":[]}]}".utf8))
+let configuredEntry=try JSONDecoder().decode(Entry.self,from:Data("{\"label\":\"ChatGPT\",\"value\":\"已配置\",\"symbol\":\"folder\",\"children\":[{\"label\":\"目录\",\"children\":[]}]}".utf8))
 expect(MenuLayout.valueWidth(configuredEntry)==MenuLayout.width("已配置",font:MenuLayout.valueFont)+12,"Indicator reserves its own column")
 expect(MenuLayout.labelWidth(configuredEntry,width:280,left:36)+36+MenuLayout.trailing(configuredEntry)+MenuLayout.valueWidth(configuredEntry)+10==280,"Status, label and arrow cannot overlap")
 // Two keys with 19-character names need far more than a homepage row; the value gives way, never the title.
@@ -204,7 +204,7 @@ let wide=DashboardView.legendLayout(["总量","OpenCodex","Claude","OpenCode","V
 expect(wide.map{$0.count}==[3,3,1] && wide[0][2].maxX==320 && wide[2][0].minX==0,"A label too long for four columns falls back to three")
 let crowded=DashboardView.legendLayout((1...8).map{"Very long harness name \($0)"},width:320)
 expect(crowded.allSatisfy{$0.count<=3} && crowded.flatMap{$0}.allSatisfy{$0.minX>=0 && $0.maxX<=320},"Wide labels stay inside the width")
-var legendData=grouped;legendData.providers=[("deepseek","DeepSeek Harness"),("codex","ChatGPT 本机用量"),("claude","Claude App")].map{var p=grouped.providers[0];p.id=$0.0;p.name=$0.1;p.summaryIncluded=true;return p}
+var legendData=grouped;legendData.providers=[("deepseek","DeepSeek Harness"),("codex","ChatGPT"),("claude","Claude App")].map{var p=grouped.providers[0];p.id=$0.0;p.name=$0.1;p.summaryIncluded=true;return p}
 expect(DashboardView.legendLabels(legendData)==["总量","DeepSeek","ChatGPT","Claude"],"Legend names drop suffixes the cards already show")
 expect(!MenuLayout.aiming(from:NSPoint(x:330,y:480),to:NSPoint(x:332,y:479),flyout:openFlyout),"A tiny drift toward the flyout is not aiming")
 // The share picture is opaque, signed, and lists every source that has data.

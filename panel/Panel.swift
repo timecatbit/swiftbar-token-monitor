@@ -331,7 +331,7 @@ final class DashboardView:FlippedView {
     // Legend names drop suffixes the cards below already show, so four fit on a row.
     static func legendLabels(_ d:Dashboard)->[String] {
         ["总量"]+d.providers.filter{$0.summaryIncluded != false}.map{p in
-            p.id=="claude" ? "Claude" : [" Harness"," 本机用量"].reduce(p.name){$0.hasSuffix($1) ? String($0.dropLast($1.count)) : $0}
+            p.id=="claude" ? "Claude" : p.name.hasSuffix(" Harness") ? String(p.name.dropLast(" Harness".count)) : p.name
         }
     }
     // The dashboard is always 344pt wide, so the legend gets 320pt between the margins.
