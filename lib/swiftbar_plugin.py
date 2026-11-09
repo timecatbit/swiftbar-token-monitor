@@ -649,7 +649,7 @@ def cache_result(record, ttl):
     return result, error
 
 
-def cached_fetch(name, loader, ttl):
+def cached_fetch(name, loader, ttl, retry=60):
     fingerprint=connection_fingerprint(name)
     record = read_cache(name)
     if not cache_due(record, ttl):
@@ -667,7 +667,7 @@ def cached_fetch(name, loader, ttl):
         record = dict(record)
         # Failed requests retry after a minute, retaining the last successful data.
         record.update(schema=1, error=str((error or (0, "数据格式异常", None))[1]),
-                      retryAt=time.time() + 60, day=datetime.now().strftime("%Y-%m-%d"))
+                      retryAt=time.time() + retry, day=datetime.now().strftime("%Y-%m-%d"))
     record["connection"]=fingerprint
     write_json_cache(cache_path(name), record)
     return cache_result(record, ttl)
@@ -1744,7 +1744,8 @@ def external_loaders():
     if os.environ.get('OCX_SELF_UPDATES')!='0':loaders['self_update']=lambda:cached_fetch('self_update',self_update_load,EXTERNAL_TTLS['self_update'])
     if module_enabled('claude-subscription'):loaders['claude_subscription']=lambda:cached_fetch('claude_subscription',claude_subscription_load,60)
     if module_enabled('qoder-subscription'):loaders['qoder_subscription']=lambda:cached_fetch('qoder_subscription',lambda:(qoder.snapshot(HOME) or {'empty':True},None),EXTERNAL_TTLS['qoder_subscription'])
-    if module_enabled('chatgpt') and chatgpt_source()=='client' and chatgpt_configured():loaders['chatgpt']=lambda:cached_fetch('chatgpt',lambda:(sources.chatgpt_account(home=chatgpt_home()),None),EXTERNAL_TTLS['chatgpt'])
+    # Each read starts the ChatGPT client's app-server, so a failing client waits its normal interval, not a minute.
+    if module_enabled('chatgpt') and chatgpt_source()=='client' and chatgpt_configured():loaders['chatgpt']=lambda:cached_fetch('chatgpt',lambda:(sources.chatgpt_account(home=chatgpt_home()),None),EXTERNAL_TTLS['chatgpt'],retry=EXTERNAL_TTLS['chatgpt'])
     for key in ACCOUNT_SOURCES:
         if module_enabled(key) and default_ready(key):loaders[key]=lambda key=key:cached_fetch(key,lambda:(accounts.account(key),None),EXTERNAL_TTLS[key])
     loaders.update(named_key_loaders())

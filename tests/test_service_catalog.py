@@ -94,6 +94,14 @@ class CatalogTests(unittest.TestCase):
             preferences.update(self.m.STATE_DIR,'module','opencodex','true')
             self.assertEqual(self.m.chatgpt_source(),'client')
         self.assertFalse(any('set-chatgpt-source' in json.dumps(entry) for entry in self.m.module_options()))
+    def test_failing_chatgpt_client_waits_its_interval_before_starting_again(self):
+        preferences.update(self.m.STATE_DIR,'module','chatgpt','true')
+        with patch.object(self.m,'chatgpt_source',return_value='client'),patch.object(self.m,'chatgpt_configured',return_value=True), \
+             patch.object(self.m.sources,'chatgpt_account',return_value={'error':'客户端接口不可用'}) as client:
+            self.m.external_loaders()['chatgpt']()
+            client.assert_called_once()
+            self.assertGreaterEqual(self.m.read_cache('chatgpt')['retryAt'],self.m.time.time()+self.m.EXTERNAL_TTLS['chatgpt']-5)
+            self.assertFalse(self.m.loader_due('chatgpt'))
     def dialogs(self,*answers):
         replies=iter(types.SimpleNamespace(returncode=0 if a is not None else 1,stdout=a or '') for a in answers)
         return patch.object(self.m,'applescript',side_effect=lambda script:next(replies,types.SimpleNamespace(returncode=0,stdout='')))
