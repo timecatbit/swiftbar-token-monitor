@@ -108,7 +108,7 @@ class DesktopTests(unittest.TestCase):
   with patch.object(self.m.claude_oauth,'fetch',return_value=answer) as fetch,patch.object(self.m,'schedule_background_refresh'):
    self.m.claude_subscription_load();self.assertFalse(fetch.call_args.kwargs['force'])
    self.m.run_action('retry-claude-usage',[])
-   self.assertIn('正在刷新','\n'.join(self.m.claude_subscription_lines({'claude_subscription':{'source':'claude-oauth','windows':[]}})))
+   self.assertNotIn('正在刷新','\n'.join(self.m.claude_subscription_lines({'claude_subscription':{'source':'claude-oauth','windows':[]}})))
    self.m.claude_subscription_load();self.assertTrue(fetch.call_args.kwargs['force'])
    self.m.claude_subscription_load();self.assertFalse(fetch.call_args.kwargs['force'])
   rows='\n'.join(self.m.claude_subscription_lines({'claude_subscription':{'source':'claude-oauth','windows':[]}}))
@@ -117,7 +117,7 @@ class DesktopTests(unittest.TestCase):
   preferences.update(self.m.STATE_DIR,'claude-oauth','true')
   with patch.object(self.m.claude_oauth,'fetch',side_effect=AssertionError('rendering must not query or renew')):
    head=self.m.panel_entries(self.m.claude_subscription_lines({}))[0]
-  self.assertEqual(head['value'],'正在读取')
+  self.assertEqual(head['value'],'待同步')
   self.assertIn('立即刷新用量',[c['label'] for c in head['children']])
  def test_refresh_failure_is_explained_once_not_on_every_row(self):
   limits={'limits':[{'kind':'weekly','percent':10,'resets_at':'2026-11-12T13:59:59Z'},{'percent':5,'scope':{'model':{'display_name':'Fable'}}}]}

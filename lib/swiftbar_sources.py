@@ -482,12 +482,15 @@ def chatgpt_account(binary=None, home=None):
         return None
     try:
         if call('initialize', {'clientInfo': {'name':'swiftbar_token_monitor','title':'SwiftBar Token Monitor','version':'5.0.0'}}) is None:
-            return {'state':'客户端接口不可用','windows':[]}
+            return {'error':'客户端接口不可用'}
         send({'method':'initialized'})
-        account = call('account/read', {'refreshToken':False}) or {}
+        account = call('account/read', {'refreshToken':False})
+        if not isinstance(account,dict):return {'error':'无法读取客户端登录状态'}
         if (account.get('account') or {}).get('type') not in ('chatgpt', 'chatgptAuthTokens'):
             return {'state':'需 ChatGPT 账户登录','windows':[]}
-        result = call('account/rateLimits/read') or {}; buckets = result.get('rateLimitsByLimitId') or {}
+        result = call('account/rateLimits/read')
+        if not isinstance(result,dict):return {'error':'额度暂不可用'}
+        buckets = result.get('rateLimitsByLimitId') or {}
         if not buckets and result.get('rateLimits'): buckets = {'codex': result['rateLimits']}
         windows = []
         for key,bucket in buckets.items():
@@ -501,7 +504,7 @@ def chatgpt_account(binary=None, home=None):
         return {'state':'已同步' if windows else '暂无可读取额度','windows':windows,
                 'plan':str((account.get('account') or {}).get('planType') or '')}
     except (OSError, ValueError, subprocess.SubprocessError):
-        return {'state':'额度暂不可用','windows':[]}
+        return {'error':'额度暂不可用'}
     finally:
         if process.poll() is None: process.terminate()
         try: process.wait(timeout=2)

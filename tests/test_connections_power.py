@@ -102,22 +102,23 @@ class PowerTests(unittest.TestCase):
             self.assertEqual(calls,['/healthz'])
             self.assertFalse(self.m.loader_due('opencodex'))
             data=self.m.gather()
-            self.assertIn('未连接',self.m.title(data).split('|')[1])
-        self.assertIsNone(data['healthz']);self.assertIsNone(data['quota'])
+            self.assertIn('sfimage=sparkles',self.m.title())
+            self.assertTrue(any('OpenCodex 管理 · 未连接' in line for line in self.m.unfiltered_management_lines(data)))
+        self.assertIsNone(data['healthz']);self.assertEqual(data['quota']['quotas'],{})
     def test_starting_readiness_body_is_cached_as_state(self):
         def request(path,**kwargs):
             return ({'version':'1.0'},None) if path=='/healthz' else (None,(503,'starting',{'status':'starting'})) if path=='/readyz' else ({},None)
         with patch.object(self.m,'ocx_configured',return_value=True),patch.object(self.m,'request',side_effect=request):
             self.m.opencodex_refresh()
             data=self.m.gather()
-            self.assertIn('正在启动',self.m.title(data))
+            self.assertTrue(any('OpenCodex 管理 · 正在启动' in line for line in self.m.unfiltered_management_lines(data)))
         self.assertEqual(self.m.ready_state(data)['status'],'starting')
     def test_first_health_check_is_shown_as_pending_not_disconnected(self):
         with patch.object(self.m,'ocx_configured',return_value=True),patch.object(self.m,'schedule_background_refresh'):
             data=self.m.gather()
-            self.assertIn('正在连接',self.m.title(data))
+            self.assertIn('sfimage=sparkles',self.m.title())
         self.assertTrue(self.m.opencodex_pending(data))
-        self.assertTrue(any('OpenCodex 管理 · 正在连接' in line for line in self.m.unfiltered_management_lines(data)))
+        self.assertTrue(any('OpenCodex 管理 · 待同步' in line for line in self.m.unfiltered_management_lines(data)))
     def test_cache_cleanup_drops_superseded_files_and_keeps_current_ones(self):
         cache=Path(self.m.CACHE_DIR);cache.mkdir(parents=True,exist_ok=True)
         current=self.m.range_cache_name();old=time.time()-2*86400

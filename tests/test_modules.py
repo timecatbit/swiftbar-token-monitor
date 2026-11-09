@@ -161,13 +161,14 @@ class ModuleTests(unittest.TestCase):
     def test_resource_open_forces_one_target_and_debounces(self):
         self.toggle('grok',True)
         loader=unittest.mock.Mock()
-        with patch.object(self.m,'external_loaders',return_value={'grok':loader,'minimax':unittest.mock.Mock()}),patch.object(self.m,'invalidate_caches') as invalidate:
+        with patch.object(self.m,'external_loaders',return_value={'grok':loader,'minimax':unittest.mock.Mock()}),patch.object(self.m,'invalidate_caches') as invalidate,patch.object(self.m,'schedule_background_refresh') as schedule:
             self.m.refresh_resource('grok');self.m.refresh_resource('grok')
-        loader.assert_called_once();invalidate.assert_called_once_with(['grok'])
+        loader.assert_not_called();invalidate.assert_called_once_with(['grok']);schedule.assert_called_once()
         with self.assertRaises(ValueError):self.m.refresh_resource('minimax')
     def test_flyout_checks_use_visible_action_whitelist(self):
         self.toggle('grok',True)
-        entries=self.m.resource_panel_entries({})
+        with patch.dict(os.environ,{'XAI_MANAGEMENT_API_KEY':'test-key','XAI_TEAM_ID':'test-team'}):
+            entries=self.m.resource_panel_entries({})
         grok=next(e for e in entries if e['label']=='Grok API')
         self.assertEqual(grok['onOpenAction'],['refresh-source','grok'])
         self.m.write_json_cache(self.m.cache_path('panel-view'),{'schema':1,'entries':entries})
@@ -175,9 +176,45 @@ class ModuleTests(unittest.TestCase):
         with patch.object(self.m,'refresh_resource') as refresh:self.m.consume_panel_action()
         refresh.assert_called_once_with('grok');self.assertEqual(self.m.read_cache('panel-action-receipt')['status'],'done')
     def test_enable_account_invalidates_recent_unconfigured_cache(self):
-        with patch.object(self.m,'invalidate_caches') as invalidate,patch.object(self.m,'schedule_background_refresh') as schedule:
+        with patch.dict(os.environ,{'XAI_MANAGEMENT_API_KEY':'test-key','XAI_TEAM_ID':'test-team'}),patch.object(self.m,'invalidate_caches') as invalidate,patch.object(self.m,'schedule_background_refresh') as schedule:
             self.m.run_action('set-module',['grok','true'])
         invalidate.assert_called_once_with(['grok']);schedule.assert_called_once()
+    def test_opening_claude_api_refreshes_default_and_named_costs_in_background(self):
+        self.toggle('claude-api',True)
+        self.assertNotIn('onOpenAction',next(e for e in self.m.resource_panel_entries({}) if e['label']=='Claude API'))
+        state=self.m.STATE_DIR
+        named=self.m.keystore.add(state,'claude-api','Test workspace','sk-ant-admin-fixture-named')
+        names=('claude-api','claude-api@'+named)
+        with patch.dict(os.environ,{'ANTHROPIC_API_KEY':'sk-ant-admin-fixture-default'}):
+            entry=next(e for e in self.m.resource_panel_entries({}) if e['label']=='Claude API')
+            self.assertEqual(entry['onOpenAction'],['refresh-source','claude-api'])
+            for name in names:
+                self.m.write_json_cache(self.m.cache_path(name),{'schema':1,'fetchedAt':self.m.time.time(),
+                    'retryAt':self.m.time.time()+60,'error':'old failure','payload':{'monthCost':12}})
+            with patch.object(self.m,'schedule_background_refresh') as schedule,patch.object(
+                    self.m.accounts,'anthropic_cost',return_value={'monthCost':15}) as cost:
+                action=entry['onOpenAction']
+                self.m.run_action(action[0],action[1:])
+                self.m.refresh_resource('claude-api')
+                schedule.assert_called_once();cost.assert_not_called()
+                loaders=self.m.external_loaders()
+                for name in names:
+                    record=self.m.read_cache(name)
+                    self.assertEqual(record['error'],'old failure')
+                    self.assertEqual(record['payload']['monthCost'],12)
+                    self.assertTrue(self.m.loader_due(name))
+                    self.assertEqual(loaders[name]()[0]['monthCost'],15)
+                self.assertEqual(cost.call_count,2)
+    def test_claude_cost_network_failure_keeps_the_last_success_and_retries(self):
+        self.toggle('claude-api',True)
+        name='claude-api';stamp=self.m.time.time()-3600
+        self.m.write_json_cache(self.m.cache_path(name),{'schema':1,'fetchedAt':stamp,'payload':{'monthCost':12}})
+        with patch.dict(os.environ,{'ANTHROPIC_API_KEY':'sk-ant-admin-fixture'}),patch.object(
+                self.m.accounts,'anthropic_cost',side_effect=TimeoutError):
+            result,error=self.m.external_loaders()[name]()
+            self.assertGreater(self.m.read_cache(name)['retryAt'],self.m.time.time())
+        self.assertEqual(result['monthCost'],12);self.assertEqual(result['_fetchedAt'],stamp)
+        self.assertTrue(error)
     def test_background_completion_republishes_without_waiting_for_interval(self):
         name=self.m.range_cache_name()
         self.m.write_json_cache(self.m.cache_path(name),{'schema':1,'payload':{'range':'today'},'fetchedAt':self.m.time.time()})

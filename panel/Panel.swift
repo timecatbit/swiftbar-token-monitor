@@ -727,9 +727,7 @@ struct PanelInteraction {
     }
     // While an action runs, only the row that started it says so.
     static func runningLabel(_ entry:Entry,active:[String]?)->String? {
-        guard let active,let name=entry.action?.first else{return nil}
-        if name=="test-api-key"{return entry.action==active ? "正在测试…" : nil}
-        return ["refresh","refresh-monitor","check-app-updates","set-range","retry-claude-usage"].contains(name) ? "正在刷新…" : nil
+        active?.first=="test-api-key" && entry.action==active ? "正在测试…" : nil
     }
     mutating func submit(_ action:[String])->Submission {
         guard !action.isEmpty else{return .ignored}
@@ -1006,12 +1004,12 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
                 option.isEnabled = true;menu.addItem(option)
             }
             picker.menu=menu;menu.delegate=self;rangePicker=picker;content.addSubview(picker)
-            // Refresh lives beside Summary in the same rounded bezel as the range menu; it dims while a refresh is running.
+            // Refresh leaves the button and current data in place; duplicate actions are coalesced.
             let refresh=HintButton(frame:NSRect(x:inner-145,y:7.5,width:28,height:25))
             refresh.bezelStyle = .rounded;refresh.controlSize = .small;refresh.title=""
             refresh.image=NSImage(systemSymbolName:"arrow.clockwise",accessibilityDescription:"刷新数据")?.withSymbolConfiguration(.init(pointSize:11,weight:.semibold));refresh.imagePosition = .imageOnly
             refresh.contentTintColor = .labelColor;refresh.hint="刷新数据";refresh.hovered={[weak self] in self?.hoverHint($0,$1)};refresh.setAccessibilityLabel("刷新数据")
-            refresh.target=self;refresh.action=#selector(refreshData);refresh.isEnabled=interaction.active != ["refresh"]
+            refresh.target=self;refresh.action=#selector(refreshData)
             content.addSubview(refresh)
             let share=HintButton(frame:NSRect(x:inner-177,y:7.5,width:28,height:25))
             share.bezelStyle = .rounded;share.controlSize = .small;share.title=""
@@ -1269,7 +1267,7 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
         }
     }
     private func dispatchAction(_ action:[String]){
-        let passive=["refresh-source","refresh-view"].contains(action[0])
+        let passive=["refresh-source","refresh-view","refresh","refresh-monitor","check-app-updates","set-range","retry-claude-usage"].contains(action[0])
         let keepOpen=PanelInteraction.keepsPanelOpen(action)
         if !keepOpen{hide()};if keepOpen && !passive{updatePresentation()}
         let id=UUID().uuidString,request=URL(fileURLWithPath:snapshotPath).deletingLastPathComponent().appendingPathComponent("panel-action.json")

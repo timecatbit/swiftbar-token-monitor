@@ -200,6 +200,7 @@ def account(source,key=None,options=None):
     the classic single connection is read from the environment.
     """
     options=options or {}
+    if key=='':return {'state':'密钥文件不可用'}
     try:
         if source=='deepseek' and key:
             return deepseek_balance(get_json('https://api.deepseek.com/user/balance',key))
@@ -227,7 +228,7 @@ def account(source,key=None,options=None):
             host,currency=MOONSHOT_HOSTS[region]
             return moonshot_balance(get_json(host+'/v1/users/me/balance',key),currency)
         if source=='claude-api':
-            key=key or credential('ANTHROPIC_API_KEY')
+            key=credential('ANTHROPIC_API_KEY') if key is None else key
             if not key:return {'state':'未配置 Claude API Key'}
             try:return anthropic_cost(key)
             except urllib.error.HTTPError as error:
@@ -238,5 +239,7 @@ def account(source,key=None,options=None):
                 raise
         return {'state':'不支持的账户来源'}
     except urllib.error.HTTPError as error:
-        return {'state':'凭据或查询权限待检查' if error.code in (401,403) else '服务暂不可用'}
-    except (OSError,ValueError,TypeError,KeyError):return {'state':'暂时无法读取'}
+        if error.code in (401,403):return {'state':'凭据或查询权限待检查'}
+        return {'error':'请求频繁，稍后重试' if error.code==429 else '服务暂不可用'}
+    except (OSError,ValueError,TypeError,KeyError):
+        return {'error':'暂时无法读取数据'}

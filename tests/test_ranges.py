@@ -34,8 +34,23 @@ class RangeTests(unittest.TestCase):
  def test_old_range_is_not_relabelled_after_selection_changes(self):
   self.m.write_json_cache(self.m.cache_path('view-range'),{'schema':1,'range':'30d'})
   d=self.m.dashboard_payload({'range_usage':{'range':'today','claude':{'summary':{'requests':100,'totalTokens':1000}}}})
-  self.assertEqual(d['rangeKey'],'30d');self.assertEqual(d['chartStatus'],'正在读取')
+  self.assertEqual(d['rangeKey'],'30d');self.assertEqual(d['chartStatus'],'待同步')
   self.assertTrue(all(not p['available'] for p in d['providers']))
+ def test_uncached_range_keeps_previous_chart_and_selection_until_ready(self):
+  def store(range_key,requests):
+   self.m.write_json_cache(self.m.cache_path(self.m.range_cache_name(range_key)),{
+    'schema':1,'day':self.m.datetime.now().strftime('%Y-%m-%d'),'fetchedAt':time.time(),
+    'payload':{'range':range_key,'claude':{'summary':{'requests':requests,'totalTokens':1000}}}})
+  store('today',100)
+  self.m.write_json_cache(self.m.cache_path('panel-view'),{'schema':1,'dashboard':{'rangeKey':'today'}})
+  self.m.write_json_cache(self.m.cache_path('view-range'),{'schema':1,'range':'30d'})
+  old=self.m.dashboard_payload(self.m.cached_data())
+  self.assertEqual(old['rangeKey'],'today')
+  self.assertEqual(next(r['action'][1] for r in self.m.range_options(old['rangeKey']) if r['checked']),'today')
+  store('30d',300)
+  current=self.m.dashboard_payload(self.m.cached_data())
+  self.assertEqual(current['rangeKey'],'30d')
+  self.assertEqual(next(p['requests'] for p in current['providers'] if p['id']=='claude'),300)
  def test_invalid_selection_is_rejected(self):
   with self.assertRaises(ValueError):self.m.run_action('set-range',['../../bad'])
  def test_range_selector_actions_are_whitelisted(self):

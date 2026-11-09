@@ -126,7 +126,7 @@ class PluginTests(unittest.TestCase):
         during=self.deepseek_entry(*self.m.cache_result(self.m.read_cache('provider_quotas'),ttl))
         self.assertEqual(before['value'],during['value']);self.assertEqual(during['value'],'余额 ¥2.00')
         state=next(row for row in during['children'][0]['children'] if row['label']=='更新时间')
-        self.assertEqual(state['value'],'正在刷新')
+        self.assertEqual(state['value'],next(row['value'] for row in before['children'][0]['children'] if row['label']=='更新时间'))
         after=self.deepseek_entry(*self.m.cached_fetch('provider_quotas',lambda:(payload,None),ttl))
         self.assertEqual(after['value'],'余额 ¥2.00')
         self.assertEqual(next(row for row in after['children'][0]['children'] if row['label']=='更新时间')['value'],'刚刚更新')
@@ -134,7 +134,7 @@ class PluginTests(unittest.TestCase):
     def test_deepseek_initial_loading_and_refresh_failure_remain_distinct(self):
         ttl=self.m.EXTERNAL_TTLS['provider_quotas']
         pending=self.deepseek_entry(*self.m.cache_result({},ttl))
-        self.assertEqual(pending['value'],'正在读取')
+        self.assertEqual(pending['value'],'待同步')
         self.assertNotIn('失败',str(pending))
         self.record('provider_quotas',{'reports':[{'provider':'deepseek','quota':{'customWindows':[{'label':'¥2.00'}]}}]},age=3600)
         failed=self.deepseek_entry(*self.m.cached_fetch('provider_quotas',lambda:(None,(0,'timeout',None)),ttl))
@@ -176,12 +176,13 @@ class PluginTests(unittest.TestCase):
         self.assertFalse(result['statusAvailable'])
         self.assertIsNone(result['servers'][0]['online'])
 
-    def test_health_failure_precedes_update_badge(self):
+    def test_health_and_update_status_stay_inside_the_menu(self):
         data={'healthz':{'version':'1.0'},'ready':{'status':'failed'},
               'badge':{'updateAvailable':True,'latestVersion':'2.0'}}
-        self.assertIn('启动失败',self.m.title(data))
+        self.assertIn('sfimage=sparkles',self.m.title())
+        self.assertTrue(any('OpenCodex 管理 · 启动失败' in line for line in self.m.unfiltered_management_lines(data)))
         data['healthz']=None
-        self.assertIn('未连接',self.m.title(data))
+        self.assertTrue(any('OpenCodex 管理 · 未连接' in line for line in self.m.unfiltered_management_lines(data)))
 
     def test_usage_failure_never_rendered_as_zero(self):
         text=self.m.render({'healthz':{'version':'1.0'},'ready':{'status':'ready'},
@@ -205,7 +206,7 @@ class PluginTests(unittest.TestCase):
             data=self.m.gather()
             rows=self.m.panel_entries(self.m.chatgpt_lines(data)+self.m.api_lines('kimi-api',data))
             self.assertEqual([r['value'] for r in rows],['已用 60%','余额 ¥12.50'])
-            self.assertEqual([next(c['value'] for c in (r['children'] if r is rows[0] else r['children'][0]['children']) if c['label']=='更新时间') for r in rows],['正在刷新','正在刷新'])
+            self.assertEqual([next(c['value'] for c in (r['children'] if r is rows[0] else r['children'][0]['children']) if c['label']=='更新时间') for r in rows],['6 分钟前更新','6 分钟前更新'])
             for name in ('chatgpt','kimi-api'):
                 self.m.cached_fetch(name,lambda:(None,(0,'网络超时',None)),300)
             data=self.m.gather()

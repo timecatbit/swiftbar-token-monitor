@@ -352,11 +352,9 @@ DARK_MODE = macos_dark_mode()
 if DARK_MODE:
     ICON_ACCENT, ICON_SECONDARY = "#84ADFF", "#B692F6"
     ICON_HERO, ICON_MUTED = "#A78BFA", "#D0D5DD"
-    ICON_WARN, ICON_BAD = "#FEC84B", "#FDA29B"
 else:
     ICON_ACCENT, ICON_SECONDARY = "#175CD3", "#6938EF"
     ICON_HERO, ICON_MUTED = "#451A8A", "#344054"
-    ICON_WARN, ICON_BAD = "#B54708", "#B42318"
 
 
 # ---------------------------------------------------------------------------
@@ -856,23 +854,6 @@ def provider_quotas_cached():
         return {"reports": [{k: row[k] for k in ("provider", "label", "source", "quota") if k in row}
                             for row in reports if isinstance(row, dict)]}, None
     return cached_fetch("provider_quotas", load, EXTERNAL_TTLS["provider_quotas"])
-
-
-def version_key(value):
-    """把 v2.50.0 / 2.50.0-beta 转成可比较的数字元组。"""
-    parts = [int(part) for part in re.findall(r"\d+", str(value or ""))]
-    return tuple((parts + [0, 0, 0])[:3])
-
-
-def has_real_update(data):
-    """以后端标记为基础，并用实际运行版本过滤陈旧的更新结果。"""
-    badge = data.get("badge") or {}
-    current = str((data.get("healthz") or {}).get("version")
-                  or badge.get("currentVersion") or "")
-    latest = str(badge.get("latestVersion") or "")
-    if current and latest and version_key(latest) <= version_key(current):
-        return False
-    return bool(badge.get("updateAvailable"))
 
 
 def update_status_cached(current_version=""):
@@ -1562,7 +1543,7 @@ def claude_subscription_lines(data):
     if not payload:
         # Rendering reads caches only. The Code login read, and a renewal that can wait ~30s for Claude Code,
         # run in the background; only the local snapshots are read here.
-        payload={'source':'claude-oauth','state':'正在读取'} if view_settings()['claudeOAuthUsage'] else claude_subscription_load()[0]
+        payload={'source':'claude-oauth','state':'待同步'} if view_settings()['claudeOAuthUsage'] else claude_subscription_load()[0]
     windows=payload.get('windows') or []
     live=payload.get('source') in ('live','claude-oauth');error=data.get('claude_subscription_error')
     if payload.get('fetchError'):error=(0,payload['fetchError'],None)
@@ -1589,8 +1570,7 @@ def claude_subscription_lines(data):
     elif isinstance(extra,dict):rows.append(item('额外用量',badge='未开启',level=1,color=MUTED,size=10))
     # Failures and stale data are explained once here, like every other source, not on each row.
     age=freshness({'_fetchedAt':payload['updatedAt']}) if windows else ''
-    if read_cache('claude-retry').get('requestedAt'):rows.append(item('更新时间',badge='正在刷新',level=1,color=MUTED,size=10))
-    elif failed:rows.append(item('更新时间',badge='刷新失败',paneldetail=str(error[1])+('\n保留最近一次成功的数据 · '+age if windows else ''),level=1,color=WARN,size=10))
+    if failed:rows.append(item('更新时间',badge='刷新失败',paneldetail=str(error[1])+('\n保留最近一次成功的数据 · '+age if windows else ''),level=1,color=WARN,size=10))
     elif windows:rows.append(item('更新时间',badge=age,paneldetail='数据待更新' if stale else None,level=1,color=MUTED,size=10))
     if view_settings()['claudeOAuthUsage']:
         rows.append(item('立即刷新用量',level=1,sfimage='arrow.clockwise',**act('retry-claude-usage')))
@@ -1657,8 +1637,8 @@ def range_bounds(key,now=None):
            'month':day.replace(day=1),'all':None}[key]
     return (start.timestamp() if start else 0),now.timestamp()
 
-def range_options():
-    key=selected_range()
+def range_options(key=None):
+    key=key or selected_range()
     return [{'label':label,'action':['set-range',value],'checked':value==key,'children':[]} for value,label in RANGES.items()]
 
 def usage_window(start,end):
@@ -1714,9 +1694,12 @@ def range_usage_cached():
                 return sources.jsonl_usage(source,root,CACHE_DIR,start,end,now.tzinfo,'opencodex' in enabled,proxy_log)
             except Exception:return {'error':'记录暂不可用'}
         bundle={'range':key,'start':start,'end':end}
+        previous=read_cache(name).get('payload') or {}
         with ThreadPoolExecutor(max_workers=max(1,len(enabled))) as pool:
             pending={source:pool.submit(collect,source) for source in enabled}
-            for source,future in pending.items():bundle[source]=future.result()
+            for source,future in pending.items():
+                result=future.result();last=previous.get(source) or {}
+                bundle[source]=dict(last,refreshError=result['error']) if result.get('error') and last.get('summary') else result
         return bundle,None
     return cached_fetch(name,load,refresh_ttl(60))
 
@@ -1780,19 +1763,27 @@ def named_key_loaders():
 
 
 # Only these visible resources can request an immediate read from a flyout.
-RESOURCE_CACHES={'deepseek':'provider_quotas','chatgpt':'chatgpt','grok':'grok','minimax':'minimax','kimi-api':'kimi-api','qoder-api':'qoder-api','komari':'komari','updates':'app_updates','claude-subscription':'claude_subscription','qoder-subscription':'qoder_subscription'}
+RESOURCE_CACHES={'deepseek':'provider_quotas','chatgpt':'chatgpt','grok':'grok','minimax':'minimax','kimi-api':'kimi-api','qoder-api':'qoder-api','claude-api':'claude-api','komari':'komari','updates':'app_updates','claude-subscription':'claude_subscription','qoder-subscription':'qoder_subscription','opencodex':'opencodex','self-update':'self_update'}
+
+def resource_cache_names(source,loaders):
+    if source=='opencodex':
+        return list(OPENCODEX_ENDPOINTS) if 'opencodex' in loaders else []
+    if source=='chatgpt' and chatgpt_source()=='proxy':
+        return ['healthz','quota','accounts','active'] if 'opencodex' in loaders else []
+    if source=='updates':
+        return [name for name in ('app_updates','badge') if name in loaders]
+    name=RESOURCE_CACHES.get(source)
+    return [key for key in loaders if key==name or key.startswith(source+'@')] if name else []
 
 def refresh_resource(source):
-    if source not in RESOURCE_CACHES or not module_enabled(source):raise ValueError('invalid resource')
+    if source not in RESOURCE_CACHES or (source!='self-update' and not module_enabled(source)):raise ValueError('invalid resource')
+    names=resource_cache_names(source,external_loaders())
+    if not names:return
     checks=read_cache('resource-checks');now=time.time();last=checks.get(source,0)
     if isinstance(last,(int,float)) and 0<=now-last<5:return
     checks[source]=now;checks['schema']=1;write_json_cache(cache_path('resource-checks'),checks)
-    if source=='chatgpt' and chatgpt_source()=='proxy':
-        invalidate_caches(['quota','accounts','active']);return
-    name=RESOURCE_CACHES[source]
-    invalidate_caches([name])
-    loader=external_loaders().get(name)
-    if loader:loader()
+    invalidate_caches(names)
+    schedule_background_refresh()
 
 def refresh_swiftbar():
     try:subprocess.run(['/usr/bin/open','-g','swiftbar://refreshplugin?name='+urllib.parse.quote(os.path.basename(PLUGIN))],capture_output=True,timeout=4)
@@ -1990,14 +1981,20 @@ def cached_data():
         data[name], data[name + "_error"] = cache_result(read_cache(name), ttl)
     if not ocx_configured():
         data.update({name:None for name in OPENCODEX_ENDPOINTS},healthz_error=(0,'未配置 OpenCodex',None))
-    elif data["healthz_error"] or not isinstance(data["healthz"], dict):
-        data.update({name:None for name in OPENCODEX_ENDPOINTS})
     for key in ACCOUNT_SOURCES:
         if not default_ready(key):data[key]=accounts.account(key);data[key+'_error']=None
     for name in named_key_loaders():
         data[name],data[name+'_error']=cache_result(read_cache(name),ttl_for(name))
     if not chatgpt_configured():data['chatgpt']={'state':'未找到 ChatGPT 客户端登录'};data['chatgpt_error']=None
     data["range_usage"],data["range_usage_error"]=cache_result(read_cache(range_cache_name()),refresh_ttl(60))
+    # A new time range and its totals appear together; keep the previous range
+    # visible until then, provided it belongs to the same sources and settings.
+    if not data['range_usage'] and not refresh_failed(data['range_usage_error']):
+        previous=(read_cache('panel-view').get('dashboard') or {}).get('rangeKey')
+        if previous in RANGES and previous!=selected_range():
+            last,error=cache_result(read_cache(range_cache_name(previous)),refresh_ttl(60))
+            if last:
+                data.update(range_usage=last,range_usage_error=error,displayed_range=previous)
     return data
 
 
@@ -2009,7 +2006,7 @@ def opencodex_pending(data):
 def freshness(payload):
     ts = (payload or {}).get("_fetchedAt")
     if not ts:
-        return "等待首次同步"
+        return "待同步"
     elapsed = max(0, int(time.time() - ts))
     if elapsed < 60:
         return "刚刚更新"
@@ -2045,27 +2042,9 @@ def deepseek_balance(data):
     return "", None
 
 
-def title(data):
-    icon_options = {"emojize": "false", "sfimage": "sparkles", "sfsize": 18}
-    if not module_enabled('opencodex') or not ocx_configured():
-        return item("", tooltip="AI 用量面板", **icon_options)
-    if opencodex_pending(data):
-        return item("", tooltip="OpenCodex · 正在连接", **icon_options)
-    if not data.get("healthz"):
-        return item("", tooltip="OpenCodex 未连接", sfimage="exclamationmark.triangle", sfsize=18, emojize="false")
-
-    status = str((ready_state(data) or {}).get("status") or "unknown")
-    if status == "failed":
-        return item("", tooltip="OpenCodex 启动失败", sfimage="exclamationmark.triangle", sfsize=18, emojize="false")
-    if status in ("pending", "starting", "unknown"):
-        return item("", tooltip="OpenCodex · " + ("状态待确认" if status == "unknown" else "正在启动"), **icon_options)
-
-    if data.get("healthz") and has_real_update(data):
-        # SwiftBar 不支持 sfcolor；更新时用独立的黄色星芒文字，
-        # 避免 color 与 sfimage 组合导致悬停后图标消失。
-        return item("✦", tooltip="OpenCodex 有新版本可更新", color=ICON_WARN, emojize="false")
-
-    return item("", tooltip="OpenCodex · 已就绪", **icon_options)
+def title():
+    """Keep the dashboard entry stable while any individual source reconnects."""
+    return item("", tooltip="AI 用量面板", emojize="false", sfimage="sparkles", sfsize=18)
 
 
 def account_quick_lines(data):
@@ -2173,7 +2152,7 @@ def komari_lines(data):
     online = sum(row.get("online") is True for row in servers)
     unknown = sum(not isinstance(row.get("online"), bool) for row in servers)
     if not servers:
-        summary = "正在同步" if error and error[1] == "正在后台读取" else ("连接失败" if error else "暂无服务器")
+        summary = "连接失败" if refresh_failed(error) else "暂无服务器" if payload else "待同步"
     elif not live:
         summary = "状态待更新"
     elif unknown:
@@ -2208,15 +2187,18 @@ def komari_lines(data):
                           panelstatus="ok" if state is True else "issue" if state is False else "unknown"))
     lines.extend(["-----", item("打开 Komari 面板", level=1, href=KOMARI_BASE_URL),
                   item("刷新监控数据", level=1, **act("refresh-monitor")),
-                  item(freshness(payload), level=1, color=MUTED, size=11)])
+                  refresh_row(payload,error)])
     return lines
 
 
 def unfiltered_management_lines(data):
     """Group operations by the application they actually control."""
     accounts=(data.get('accounts') or {}).get('accounts') or []
-    healthy=bool(data.get('healthz'));pending=opencodex_pending(data)
-    lines=resource_lines(data)+[item('OpenCodex 管理' if healthy else 'OpenCodex 管理 · '+('正在连接' if pending else '未连接'),sfimage='slider.horizontal.3')]
+    healthy=bool(data.get('healthz')) and not refresh_failed(data.get('healthz_error'));pending=opencodex_pending(data)
+    readiness=(ready_state(data) or {}).get('status')
+    status=(('启动失败' if readiness=='failed' else '正在启动' if readiness in ('pending','starting') else '')
+            if healthy else ('待同步' if pending else '未连接'))
+    lines=resource_lines(data)+[item('OpenCodex 管理'+(' · '+status if status else ''),sfimage='slider.horizontal.3')]
     children=[]
     children.extend([item('打开控制台',href=BASE+'/',sfimage='macwindow'),
                      item('查看完整用量',href=NATIVE_USAGE_URL,sfimage='chart.bar.xaxis')])
@@ -2236,11 +2218,11 @@ def unfiltered_management_lines(data):
         children.extend(['---',item('数据更新时间',panelsection=True,color=MUTED,size=11)])
         # The homepage reads the selected range bundle, so report that bundle's age.
         usage=data.get('range_usage') or {}
-        for label,payload,error in [('用量统计 · '+RANGES.get(selected_range(),''),usage,data.get('range_usage_error') or (usage.get('opencodex') or {}).get('error')),
+        ocx_usage=usage.get('opencodex') or {}
+        for label,payload,error in [('用量统计 · '+RANGES.get(usage.get('range') or selected_range(),''),usage,data.get('range_usage_error') or ocx_usage.get('refreshError') or ocx_usage.get('error')),
                                     ('供应商余额',data.get('provider_quotas') or {},data.get('provider_quotas_error'))]:
             status=freshness(payload)
-            if error:status+=' · 读取失败' if payload else ' · 待同步'
-            elif payload.get('_stale'):status+=' · 正在更新'
+            if error and (not isinstance(error,(list,tuple)) or refresh_failed(error)):status+=' · 读取失败'
             children.append(item(label,badge=status,color=MUTED,size=11))
     lines.extend(nest(children));lines.extend(komari_lines(data));lines.extend(app_update_lines(data));lines.extend(self_update_lines(data));lines.append('---')
     lines.append(item('刷新数据',sfimage='arrow.clockwise',**act('refresh')))
@@ -2271,22 +2253,27 @@ def chatgpt_lines(data):
     label=catalog.BY_KEY['chatgpt'].label
     if chatgpt_source()=='proxy':
         usage=account_usage(data);known=[used for _,used,_ in usage if used is not None]
-        if not usage:badge='正在读取' if ocx_configured() else '未配置'
+        error=data.get('healthz_error') if refresh_failed(data.get('healthz_error')) else data.get('quota_error')
+        failed=refresh_failed(error)
+        if not usage:badge='待同步' if ocx_configured() else '未配置'
         elif len(usage)==1:badge=(used_text(usage[0][1]) if usage[0][1] is not None else '额度待同步')+usage[0][2]
         else:badge='已用 '+' · '.join('%s %s%s'%(name,'%g%%'%round(used,1) if used is not None else '—',state) for name,used,state in usage)
         compact='%d 个账户'%len(usage)
         if len(usage)>2 or len(badge)>32:badge=compact
-        lines=[item(label,badge=badge,panelfallback=compact if len(usage)>1 and badge!=compact else None,**brand_icon('chatgpt'),panelusagelevel=usage_level(max(known)) if known else None)]
+        lines=[item(label,badge=with_failure(badge,bool(usage),failed),
+            panelfallback=with_failure(compact,True,failed) if len(usage)>1 and badge!=compact else None,
+            **brand_icon('chatgpt'),panelusagelevel=usage_level(max(known),failed) if known else None)]
         lines.append(item('来源 · OpenCodex 账户 · 编程工具额度',level=1,color=MUTED,size=10))
         for name,used,state in usage:
             lines.append(item(name,level=1,badge=(used_text(used) if used is not None else '额度待同步')+state,
-                              panelusagelevel=usage_level(used) if used is not None else None))
+                              panelusagelevel=usage_level(used,failed) if used is not None else None))
+        if ocx_configured():lines.append(refresh_row(data.get('quota') or {},error))
         lines.append(item('打开账户管理',level=1,href=BASE+'/',sfimage='arrow.up.right'))
         return lines
     payload=data.get('chatgpt') or {};windows=payload.get('windows') or [];error=data.get('chatgpt_error');failed=refresh_failed(error)
     visible=[w for w in windows if not w.get('resetsAt') or w['resetsAt']>time.time()]
     most=max((100-w['remaining'] for w in visible),default=None)
-    badge=used_text(most) if visible else ('未配置' if not chatgpt_configured() else payload.get('state','正在读取'))
+    badge=used_text(most) if visible else ('未配置' if not chatgpt_configured() else payload.get('state','待同步'))
     if windows and not visible:badge='待刷新'
     lines=[item(label,badge=with_failure(badge,bool(visible),failed),**brand_icon('chatgpt'),panelusagelevel=usage_level(most,failed) if visible else None)]
     lines.append(item('来源 · 本机登录 · 编程工具额度',level=1,color=MUTED,size=10))
@@ -2294,7 +2281,7 @@ def chatgpt_lines(data):
         minutes=w.get('minutes') or 0
         lines.append(item(chatgpt_window_label(w),level=1,badge=used_text(100-w['remaining']),panelusagelevel=usage_level(100-w['remaining'],failed),
                           paneldetail=window_detail(100-w['remaining'],w.get('resetsAt'),minutes*60,payload.get('_fetchedAt'),failed)))
-    if not visible and not failed:lines.append(item(payload.get('state','未配置' if not chatgpt_configured() else '正在读取'),level=1,color=MUTED,size=10))
+    if not visible and not failed and payload.get('state'):lines.append(item(payload['state'],level=1,color=MUTED,size=10))
     if chatgpt_configured():lines.append(refresh_row(payload,error))
     lines.append(item('打开 ChatGPT',level=1,href='https://chatgpt.com',sfimage='arrow.up.right'))
     return lines
@@ -2736,7 +2723,7 @@ def key_value(provider,entry,data):
     if check and check.get('valid') is False:return {'text':'Key 无效'}
     if payload.get('permission') is False:return {'text':'无花费权限'}
     if provider in KEY_TTLS:
-        return {'text':'刷新失败' if failed else payload['state'] if payload.get('state') not in (None,'已同步') else '正在读取'}
+        return {'text':'刷新失败' if failed else payload['state'] if payload.get('state') not in (None,'已同步') else '待同步'}
     if provider in accounts.KEY_CHECKS:
         return {'text':{True:'Key 有效',False:'Key 无效'}.get(check.get('valid'),'测试未完成') if check else '待测试'}
     return {'text':'已配置'}
@@ -2822,7 +2809,7 @@ def provider_account_lines(key,data):
     service=catalog.BY_KEY[key];payload=data.get(key) or {};error=data.get(key+'_error');failed=refresh_failed(error)
     windows=[w for w in payload.get('windows',[]) if not w.get('resetsAt') or w['resetsAt']>time.time()]
     most=max((100-w['remaining'] for w in windows),default=None)
-    badge=used_text(most) if windows else '待刷新' if payload.get('windows') else payload.get('state','正在读取') if connection_ready(key) else '未配置'
+    badge=used_text(most) if windows else '待刷新' if payload.get('windows') else payload.get('state','待同步') if connection_ready(key) else '未配置'
     rows=[item(service.label,badge=with_failure(badge,bool(windows),failed),**brand_icon(key),panelusagelevel=usage_level(most,failed) if windows else None)]
     for w in windows:
         rows.append(item(w['name'],level=1,badge=used_text(100-w['remaining']),panelusagelevel=usage_level(100-w['remaining'],failed),
@@ -2891,7 +2878,7 @@ def with_failure(badge,has_data,failed):
 
 def refresh_row(payload,error,level=1):
     failed=refresh_failed(error)
-    state='刷新失败' if failed else '正在刷新' if payload.get('_stale') or not payload else freshness(payload)
+    state='刷新失败' if failed else freshness(payload)
     detail=(str(error[1])+('\n保留最近一次成功的数据 · '+freshness(payload) if payload.get('_fetchedAt') else '')) if failed else None
     return item('更新时间',badge=state,paneldetail=detail,level=level,color=WARN if failed else MUTED,size=10)
 
@@ -2960,7 +2947,7 @@ def dashboard_payload(data):
             value=float(value)
             return value if 0<=value<1e20 else 0.0
         except (TypeError,ValueError):return 0.0
-    now=usage_now();key=selected_range();bundle=data.get('range_usage') or {}
+    now=usage_now();key=data.get('displayed_range') or selected_range();bundle=data.get('range_usage') or {}
     if bundle.get('range')!=key:bundle={}
     start,end=range_bounds(key,now)
     start=bundle.get('start',start);end=bundle.get('end',end)
@@ -2999,7 +2986,8 @@ def dashboard_payload(data):
         if cost is not None:cost=number(cost)
         requests=int(number(summary.get('requests')));unpriced=int(number(summary.get('unpricedRequests')))
         if requests and unpriced>=requests:cost=None
-        if not available:status=str(usage.get('error') or ('正在读取' if not bundle else '暂不可用'))
+        if not available:status=str(usage.get('error') or ('待同步' if not bundle else '暂不可用'))
+        elif usage.get('refreshError'):status='刷新失败 · 保留原数据'
         elif usage.get('partial'):status='部分记录未读取'
         elif unpriced>=requests and requests and not credits:status='费用待定价'
         return {'id':pid,'name':label,'subtitle':subtitle,'status':status,'available':available,'credits':credits or None,
@@ -3055,7 +3043,7 @@ def dashboard_payload(data):
         size=int((len(slots)+59)//60)
         for p in providers:p['history']=[sum(p['history'][i:i+size]) for i in range(0,len(slots),size)]
         labels=[labels[i] for i in range(0,len(slots),size)];unit='每 %d 天'%size
-    chart_status='正在读取' if not bundle else ('部分图表数据不可用' if any(p.get('error') or p.get('chartUnavailable') for p in usage_sources) else '')
+    chart_status=('数据暂不可用' if refresh_failed(data.get('range_usage_error')) else '待同步') if not bundle else ('部分图表数据不可用' if any(p.get('error') or p.get('chartUnavailable') for p in usage_sources) else '')
     if any(p.get('historyTruncated') or p.get('entriesTruncated') for p in usage_sources):chart_status='仅含现有记录'
     if key=='all' and any(number(p.get('summary',{}).get('requests'))>sum(number(day.get('requests')) for day in p.get('days',[])) for p in usage_sources):chart_status='图表展示最近 366 天'
     return {'date':now.date().isoformat(),'dates':labels,'providers':providers,'rangeKey':key,'rangeLabel':RANGES[key],
@@ -3076,12 +3064,15 @@ def native_menu_line(line):
 def resource_panel_entries(data):
     entries=panel_entries(management_lines(data))
     services={service.label:service for service in catalog.SERVICES}
+    loaders=external_loaders()
     groups={label:[] for label in ('订阅','API','其他')}
     for entry in entries:
         if entry.get('separator'):continue
         label=entry['label'];service=services.get(label)
-        source=service.key if service else 'komari' if label.startswith('Komari 监控') else 'updates' if label=='Harness 更新' else None
-        if source in RESOURCE_CACHES and entry.get('children'):entry['onOpenAction']=['refresh-source',source]
+        source=service.key if service else ('komari' if label.startswith('Komari 监控') else 'updates' if label=='Harness 更新'
+            else 'opencodex' if label.startswith('OpenCodex 管理') else 'self-update' if label==PRODUCT else None)
+        if entry.get('children') and resource_cache_names(source,loaders):
+            entry['onOpenAction']=['refresh-source',source]
         # Refresh sits beside Summary; SwiftBar's own submenu covers its housekeeping.
         if label=='刷新数据':continue
         groups[service.category if service else '其他'].append(entry)
@@ -3109,12 +3100,12 @@ def render(data):
             overview.append(item('Summary · '+dashboard['rangeLabel']+' · '+fmt_tokens(total)+' Token' if valid else 'Summary · 数据待同步'))
         for provider in dashboard['providers']:
             overview.append(item(provider['name']+' · '+(fmt_tokens(provider['tokens'])+' Token' if provider['available'] else provider['status'])))
-        return "\n".join([title(data),'---']+[native_menu_line(line) for line in overview+(['---'] if overview else [])+management_lines(data)+['---']+module_menu_lines()])
+        return "\n".join([title(),'---']+[native_menu_line(line) for line in overview+(['---'] if overview else [])+management_lines(data)+['---']+module_menu_lines()])
     write_json_cache(cache_path("panel-view"), {"schema":1,"project":{"name":PRODUCT,"url":REPOSITORY},"dashboard":dashboard,
-        "entries":resource_panel_entries(data),"rangeOptions":range_options(),
+        "entries":resource_panel_entries(data),"rangeOptions":range_options(dashboard['rangeKey']),
         "moduleOptions":options,"appearance":view_settings()['appearance'],"preferences":presentation_settings(),
         "updateCount":update_attention_count(update_rows(data))})
-    return "\n".join([panel_title(title(data)),'---']+[native_menu_line(line) for line in native_rows])
+    return "\n".join([panel_title(title()),'---']+[native_menu_line(line) for line in native_rows])
 
 
 # ---------------------------------------------------------------------------
@@ -3214,7 +3205,7 @@ def run_action(name, extra):
         elif name=='set-appearance':preferences.update(STATE_DIR,'appearance',extra[0] if extra else '')
         else:preferences.update(STATE_DIR,'reset')
         if name=='set-module' and len(extra)==2 and extra[1]=='true' and extra[0] in RESOURCE_CACHES:
-            invalidate_caches([RESOURCE_CACHES[extra[0]]])
+            invalidate_caches(resource_cache_names(extra[0],external_loaders()))
         schedule_background_refresh()
     elif name == 'set-subscription':
         if len(extra)!=2:raise ValueError('invalid subscription')
@@ -3337,7 +3328,7 @@ def run_action(name, extra):
         write_json_cache(cache_path("view-range"),{"schema":1,"range":key})
         schedule_background_refresh()
     elif name == "refresh":
-        invalidate_caches([range_cache_name()] + list(EXTERNAL_TTLS))
+        invalidate_caches([range_cache_name()] + list(EXTERNAL_TTLS) + list(named_key_loaders()))
         schedule_background_refresh()
     elif name == "update-self":
         release=plugin_update({'self_update':read_cache('self_update').get('payload') or {}})
@@ -3528,7 +3519,7 @@ def main():
         print(render(gather()))
     except Exception as exc:
         # A malformed response must never remove the menu or expose secrets in a traceback.
-        print(item("!", tooltip="OpenCodex 数据暂不可用", emojize="false"))
+        print(title())
         print("---")
         print(item("数据读取异常 · " + type(exc).__name__))
         print(item("打开控制台", href=BASE + "/"))

@@ -84,9 +84,9 @@ class CatalogTests(unittest.TestCase):
         with patch.object(self.m,'ocx_configured',return_value=True):
             preferences.update(self.m.STATE_DIR,'module','opencodex','true')
             self.assertEqual(self.m.chatgpt_source(),'proxy');self.assertIn('opencodex',self.m.external_loaders())
-            with patch.object(self.m,'invalidate_caches') as invalidate:
+            with patch.object(self.m,'invalidate_caches') as invalidate,patch.object(self.m,'schedule_background_refresh'):
                 self.m.refresh_resource('chatgpt');self.m.refresh_resource('chatgpt')
-            invalidate.assert_called_once_with(['quota','accounts','active'])
+            invalidate.assert_called_once_with(['healthz','quota','accounts','active'])
             preferences.update(self.m.STATE_DIR,'module','opencodex','false')
             # Unchecked OpenCodex: local login is used and its management API is no longer polled.
             self.assertEqual(self.m.chatgpt_source(),'client');self.assertNotIn('opencodex',self.m.external_loaders())
@@ -219,6 +219,10 @@ class CatalogTests(unittest.TestCase):
             hint=next(c for c in row['children'][0]['children'] if c['label']=='Key 所属账户没有查看花费的权限');self.assertIn('sk-ant-admin',hint['detail'])
             row=self.entry('Claude API',{'claude-api':{'monthCost':3.0,'todayCost':0,'_stale':True},'claude-api_error':(0,'timeout',None)})
             self.assertEqual(row['value'],'本月已用 $3.00 · 刷新失败')
+            previous={'monthCost':12.35,'_fetchedAt':self.m.time.time()-120}
+            fresh=self.entry('Claude API',{'claude-api':previous})
+            checking=self.entry('Claude API',{'claude-api':dict(previous,_stale=True)})
+            self.assertEqual(fresh,checking)
         self.assertNotIn('PRIVATE',json.dumps(row))
     def test_homepage_badges_say_what_is_known_instead_of_portal_hint(self):
         for key in ('chatgpt-api','claude-api','minimax-api','gemini-subscription'):preferences.update(self.m.STATE_DIR,'module',key,'true')
@@ -226,7 +230,7 @@ class CatalogTests(unittest.TestCase):
         with patch.dict(os.environ,{'OPENAI_API_KEY':'sk-PRIVATE','ANTHROPIC_API_KEY':'sk-ant-PRIVATE','MINIMAX_PLATFORM_API_KEY':'PRIVATE'}):
             values=lambda data:{e['label']:e.get('value') for e in self.m.resource_panel_entries(data) if not e.get('separator')}
             self.assertEqual({k:v for k,v in values({}).items() if k in ('ChatGPT API','Claude API','MiniMax API','Gemini 订阅')},
-                             {'ChatGPT API':'待测试','Claude API':'正在读取','MiniMax API':'已配置','Gemini 订阅':'已标记'})
+                             {'ChatGPT API':'待测试','Claude API':'待同步','MiniMax API':'已配置','Gemini 订阅':'已标记'})
             with patch.object(self.m.accounts,'check_key',return_value={'valid':False,'state':'Key 无效或无权限'}):
                 self.m.test_api_key('chatgpt-api');self.m.test_api_key('claude-api')
             current=values({'claude-api':{'state':'Key 所属账户没有查看花费的权限','permission':False,'reason':'role'}})
