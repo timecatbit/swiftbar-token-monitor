@@ -526,12 +526,13 @@ final class DashboardView:FlippedView {
         totalColor.withAlphaComponent(dark(self) ? 0.035 : 0.025).setFill();card.fill()
         for f in [CGFloat(0),0.5,1]{
             let yy=plot.maxY-f*plot.height
-            text(axisTokens(ceiling*Double(f)),x:left-2,y:yy-5,w:27,size:8,color:.secondaryLabelColor,align:.right,numeric:true)
+            // The chart's text keeps to the same edges as the figures above: axis labels flush left.
+            text(axisTokens(ceiling*Double(f)),x:left,y:yy-5,w:25,size:8,color:.secondaryLabelColor,numeric:true)
             line(NSPoint(x:plot.minX,y:yy),NSPoint(x:plot.maxX,y:yy),color:NSColor.separatorColor.withAlphaComponent(0.22),width:0.5)
         }
         // Partial data and when the figures were read share a faint note in the card's top-right corner, above the top grid line.
         let note=[data.chartStatus,data.updated ?? ""].filter{!$0.isEmpty}.joined(separator:" · ")
-        if !note.isEmpty {text(note,x:cardFrame.minX+6,y:plot.minY-11,w:cardFrame.width-12,size:7.5,color:.tertiaryLabelColor,align:.right)}
+        if !note.isEmpty {text(note,x:cardFrame.minX+6,y:plot.minY-11,w:right-cardFrame.minX-6,size:7.5,color:.tertiaryLabelColor,align:.right)}
         if n==1 {
             for (i,values) in series.enumerated(){let y=plot.maxY-CGFloat(values[0]/ceiling)*plot.height;accent(summaryProviders[i].id,self).setFill();NSBezierPath(ovalIn:NSRect(x:plot.midX-2.5,y:y-2.5,width:5,height:5)).fill()}
             let y=plot.maxY-CGFloat(totals[0]/ceiling)*plot.height;totalColor.setFill();NSBezierPath(ovalIn:NSRect(x:plot.midX-3,y:y-3,width:6,height:6)).fill()
@@ -548,7 +549,7 @@ final class DashboardView:FlippedView {
         }
         let middle=(1..<n-1).filter{positions[$0]>=0.25 && positions[$0]<=0.75}.min{abs(positions[$0]-0.5)<abs(positions[$1]-0.5)}
         let labelIndices=[0]+(middle.map{[$0]} ?? [])+[n-1]
-        for i in labelIndices{let label=data.dates[i];let x=plot.minX+CGFloat(positions[i])*plot.width;text(label,x:i==0 ? x : (i==n-1 ? x-48 : x-25),y:204,w:i==n-1 ? 48 : 50,size:8.5,color:.secondaryLabelColor,align:i==0 ? .left : (i==n-1 ? .right : .center))}
+        for i in labelIndices{let label=data.dates[i];let x=plot.minX+CGFloat(positions[i])*plot.width;text(label,x:i==0 ? x : (i==n-1 ? right-48 : x-25),y:204,w:i==n-1 ? 48 : 50,size:8.5,color:.secondaryLabelColor,align:i==0 ? .left : (i==n-1 ? .right : .center))}
     }
 
 }
