@@ -59,9 +59,9 @@ class RangeTests(unittest.TestCase):
   self.m.write_json_cache(self.m.cache_path('view-range'),{'schema':1,'range':'30d'})
   old=self.m.dashboard_payload(self.m.cached_data())
   self.assertEqual(old['rangeKey'],'today')
-  self.assertEqual(old['requestedRange'],'30d')
-  self.assertEqual(old['chartStatus'],'正在读取近 30 天 · 当前显示当天')
-  self.assertEqual(next(r['action'][1] for r in self.m.range_options(old['requestedRange']) if r['checked']),'30d')
+  # No progress text: the previous range keeps its title, check mark and note until the new one is ready.
+  self.assertNotIn('30',old['chartStatus'])
+  self.assertEqual(next(r['action'][1] for r in self.m.range_options(old['rangeKey']) if r['checked']),'today')
   store('30d',300)
   current=self.m.dashboard_payload(self.m.cached_data())
   self.assertEqual(current['rangeKey'],'30d')

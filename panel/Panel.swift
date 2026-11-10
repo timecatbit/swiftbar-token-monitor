@@ -16,7 +16,7 @@ struct ProviderUsage:Decodable {
     var cost:Double?;var credits:Double?;var tokens:Double;var requests:Int;var output:Double;var cache:Double?;var coverage:Double?
     var sessions:Int;var unpriced:Int;var summaryIncluded:Bool?;var models:[ModelUsage];var history:[Double]
 }
-struct Dashboard:Decodable {var date:String;var dates:[String];var providers:[ProviderUsage];var rangeKey:String;var rangeLabel:String;var requestedRangeLabel:String?;var chartUnit:String;var chartSpan:String;var chartStatus:String;var updated:String?;var chartPositions:[Double]?;var showSummary:Bool?;var allowCollapse:Bool?;var expandedProviders:[String]?}
+struct Dashboard:Decodable {var date:String;var dates:[String];var providers:[ProviderUsage];var rangeKey:String;var rangeLabel:String;var chartUnit:String;var chartSpan:String;var chartStatus:String;var updated:String?;var chartPositions:[Double]?;var showSummary:Bool?;var allowCollapse:Bool?;var expandedProviders:[String]?}
 struct Project:Decodable {var name:String;var url:String}
 struct Snapshot:Decodable {var project:Project?;var dashboard:Dashboard?;var entries:[Entry];var rangeOptions:[Entry]?;var updateCount:Int?;var moduleOptions:[Entry]?;var appearance:String?;var preferences:PresentationPreferences?}
 func dark(_ view:NSView)->Bool {view.effectiveAppearance.bestMatch(from:[.darkAqua,.aqua]) == .darkAqua}
@@ -1007,10 +1007,9 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
         if !managerOnly,let dashboard=snapshot.dashboard,let choices=snapshot.rangeOptions {
             let picker=NSPopUpButton(frame:NSRect(x:inner-113,y:7.5,width:101,height:25),pullsDown:true)
             picker.controlSize = .small;picker.font = .systemFont(ofSize:11);picker.bezelStyle = .rounded
-            let label=dashboard.requestedRangeLabel ?? dashboard.rangeLabel
-            picker.preferredEdge = .maxY;picker.setAccessibilityLabel("统计范围 · "+label)
+            picker.preferredEdge = .maxY;picker.setAccessibilityLabel("统计范围 · "+dashboard.rangeLabel)
             let menu=NSMenu(title:"统计范围");menu.autoenablesItems=false;menu.delegate=self
-            let title=NSMenuItem(title:label+(label==dashboard.rangeLabel ? "" : "…"),action:nil,keyEquivalent:"");menu.addItem(title)
+            let title=NSMenuItem(title:dashboard.rangeLabel,action:nil,keyEquivalent:"");menu.addItem(title)
             for choice in choices {
                 let option=NSMenuItem(title:choice.label,action:#selector(chooseRange(_:)),keyEquivalent:"")
                 option.target=self;option.representedObject=choice.action;option.state=choice.checked==true ? .on : .off

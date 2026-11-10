@@ -2036,14 +2036,12 @@ def cached_data():
     for name in named_key_loaders():
         data[name],data[name+'_error']=cache_result(read_cache(name),ttl_for(name))
     if not chatgpt_configured():data['chatgpt']={'state':'未找到 ChatGPT 客户端登录'};data['chatgpt_error']=None
-    requested=selected_range()
-    data['requested_range']=requested
-    data["range_usage"],data["range_usage_error"]=cache_result(read_cache(range_cache_name(requested)),refresh_ttl(60))
+    data["range_usage"],data["range_usage_error"]=cache_result(read_cache(range_cache_name()),refresh_ttl(60))
     # A new time range and its totals appear together; keep the previous range
     # visible until then, provided it belongs to the same sources and settings.
     if not data['range_usage'] and not refresh_failed(data['range_usage_error']):
         previous=(read_cache('panel-view').get('dashboard') or {}).get('rangeKey')
-        if previous in RANGES and previous!=requested:
+        if previous in RANGES and previous!=selected_range():
             last,error=cache_result(read_cache(range_cache_name(previous)),refresh_ttl(60))
             if last:
                 data.update(range_usage=last,range_usage_error=error,displayed_range=previous)
@@ -3009,7 +3007,7 @@ def dashboard_payload(data):
             value=float(value)
             return value if 0<=value<1e20 else 0.0
         except (TypeError,ValueError):return 0.0
-    now=usage_now();requested=data.get('requested_range') or selected_range();key=data.get('displayed_range') or requested;bundle=data.get('range_usage') or {}
+    now=usage_now();key=data.get('displayed_range') or selected_range();bundle=data.get('range_usage') or {}
     if bundle.get('range')!=key:bundle={}
     start,end=range_bounds(key,now)
     start=bundle.get('start',start);end=bundle.get('end',end)
@@ -3114,11 +3112,7 @@ def dashboard_payload(data):
     if reads:
         read=datetime.fromtimestamp(min(reads),now.tzinfo)
         updated='更新时间：'+read.strftime('%H:%M' if read.date()==now.date() else '%m/%d %H:%M')
-    # This message is only for an explicit range change that has not completed. The
-    # usual background refreshes still leave the UI and its last good figures alone.
-    if requested!=key:chart_status='正在读取%s · 当前显示%s'%(RANGES[requested],RANGES[key])
     return {'date':now.date().isoformat(),'dates':labels,'providers':providers,'rangeKey':key,'rangeLabel':RANGES[key],
-            'requestedRange':requested,'requestedRangeLabel':RANGES[requested],
             'chartUnit':unit,'chartSpan':span,'chartStatus':chart_status,'updated':updated,'chartPositions':chart_positions,
             'showSummary':module_enabled('summary'),'allowCollapse':view_settings()['allowCollapse'],'expandedProviders':view_settings()['expandedProviders']}
 
@@ -3174,7 +3168,7 @@ def render(data):
             overview.append(item(provider['name']+' · '+(fmt_tokens(provider['tokens'])+' Token' if provider['available'] else provider['status'])))
         return "\n".join([title(),'---']+[native_menu_line(line) for line in overview+(['---'] if overview else [])+management_lines(data)+['---']+module_menu_lines()])
     write_json_cache(cache_path("panel-view"), {"schema":1,"project":{"name":PRODUCT,"url":REPOSITORY},"dashboard":dashboard,
-        "entries":resource_panel_entries(data),"rangeOptions":range_options(dashboard['requestedRange']),
+        "entries":resource_panel_entries(data),"rangeOptions":range_options(dashboard['rangeKey']),
         "moduleOptions":options,"appearance":view_settings()['appearance'],"preferences":presentation_settings(),
         "updateCount":update_attention_count(update_rows(data))})
     return "\n".join([panel_title(title()),'---']+[native_menu_line(line) for line in native_rows])
