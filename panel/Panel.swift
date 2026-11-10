@@ -11,10 +11,19 @@ struct Entry: Decodable {
         return action?.joined(separator:"\u{001F}") ?? href ?? label.components(separatedBy:" · ").first ?? label}
 }
 struct ModelUsage:Decodable {var name:String;var tokens:Double;var share:Double;var credits:Double?}
+struct CountedUsage:Decodable {var cost:Double?;var tokens:Double;var requests:Int;var unpriced:Int;var cache:Double?;var history:[Double]}
 struct ProviderUsage:Decodable {
     var id:String;var name:String;var subtitle:String;var status:String;var available:Bool
     var cost:Double?;var credits:Double?;var tokens:Double;var requests:Int;var output:Double;var cache:Double?;var coverage:Double?
-    var sessions:Int;var unpriced:Int;var summaryIncluded:Bool?;var models:[ModelUsage];var history:[Double]
+    var sessions:Int;var unpriced:Int;var summaryIncluded:Bool?;var counted:CountedUsage?;var models:[ModelUsage];var history:[Double]
+    // What Summary adds for this source: nothing when it isn't counted, and only the requests no gateway
+    // logged when a gateway (OpenCodex, Magpie) counts the rest. The card itself keeps every record.
+    var summaryPart:ProviderUsage? {
+        guard summaryIncluded != false else{return nil}
+        guard let c=counted else{return self}
+        var part=self;part.cost=c.cost;part.tokens=c.tokens;part.requests=c.requests;part.unpriced=c.unpriced;part.cache=c.cache;part.history=c.history
+        return part
+    }
 }
 struct Dashboard:Decodable {var date:String;var dates:[String];var providers:[ProviderUsage];var rangeKey:String;var rangeLabel:String;var chartUnit:String;var chartSpan:String;var chartStatus:String;var updated:String?;var chartPositions:[Double]?;var showSummary:Bool?;var allowCollapse:Bool?;var expandedProviders:[String]?}
 struct Project:Decodable {var name:String;var url:String}
@@ -169,7 +178,7 @@ final class ShareCard:FlippedView {
     let dashboard:Dashboard,project:Project
     private var rows:[ProviderUsage] {dashboard.providers}
     // Totals, chart and the share bar use what Summary counts; other sources are listed after them.
-    private var counted:[ProviderUsage] {rows.filter{$0.summaryIncluded != false}}
+    private var counted:[ProviderUsage] {rows.compactMap{$0.summaryPart}}
     static func blockHeight(_ p:ProviderUsage)->CGFloat {60+CGFloat(max(1,p.models.count))*modelHeight+16}
     private var cardHeight:CGFloat {Self.inset+188+(dashboard.dates.count>1 ? Self.chartHeight : 0)+24+rows.reduce(0){$0+Self.blockHeight($1)}+Self.inset-20}
     init(_ dashboard:Dashboard,project:Project){
@@ -287,7 +296,8 @@ final class ShareCard:FlippedView {
                 draw(tag,capsule.insetBy(dx:6,dy:2),tagFont,.secondaryLabelColor,.center)
             }
             draw(headline(p),NSRect(x:right-130,y:y,width:130,height:20),font(15,.semibold,rounded:true),.labelColor,.right)
-            draw(tokenLine(p)+(inSummary && p.tokens>0 ? " · 占 "+share(p.tokens/sum) : ""),NSRect(x:left+18,y:y+21,width:width-18,height:15),font(11.5,.medium),.secondaryLabelColor)
+            let part=p.summaryPart?.tokens ?? 0
+            draw(tokenLine(p)+(part>0 ? " · 占 "+share(part/sum) : ""),NSRect(x:left+18,y:y+21,width:width-18,height:15),font(11.5,.medium),.secondaryLabelColor)
             draw(DashboardView.stats(p),NSRect(x:left+18,y:y+38,width:width-18,height:15),font(10.5,.regular),.secondaryLabelColor)
             var my=y+60
             if p.models.isEmpty{draw("此时段暂无模型调用",NSRect(x:left+18,y:my,width:width-18,height:15),font(11,.regular),.secondaryLabelColor)}
@@ -323,7 +333,7 @@ final class ShareCard:FlippedView {
 }
 final class DashboardView:FlippedView {
     var data:Dashboard;var toggleProvider:((String,Bool)->Void)?;private var hoveredProvider:String?
-    private var summaryProviders:[ProviderUsage] {data.providers.filter{$0.summaryIncluded != false}}
+    private var summaryProviders:[ProviderUsage] {data.providers.compactMap{$0.summaryPart}}
     static func sectionHeight(_ p:ProviderUsage)->CGFloat {78+CGFloat(max(1,p.models.count))*18}
     static func providerHeight(_ p:ProviderUsage,_ d:Dashboard)->CGFloat {
         guard d.allowCollapse==true else{return sectionHeight(p)}
@@ -331,7 +341,7 @@ final class DashboardView:FlippedView {
     }
     // Legend names drop suffixes the cards below already show, so four fit on a row.
     static func legendLabels(_ d:Dashboard)->[String] {
-        ["总量"]+d.providers.filter{$0.summaryIncluded != false}.map{p in
+        ["总量"]+d.providers.compactMap{$0.summaryPart}.map{p in
             p.id=="claude" ? "Claude" : p.name.hasSuffix(" Harness") ? String(p.name.dropLast(" Harness".count)) : p.name
         }
     }

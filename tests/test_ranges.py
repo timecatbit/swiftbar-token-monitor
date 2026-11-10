@@ -76,7 +76,7 @@ class RangeTests(unittest.TestCase):
    with patch.object(self.m,'launch_background') as launch:
     self.m.run_action('set-range',['all'])
    launch.assert_called_once_with('--refresh-range')
-   with patch.object(sys,'argv',['plugin','--refresh-range']),patch.object(self.m,'refresh_swiftbar') as publish,patch.object(self.m,'usage_now',return_value=self.now),patch.object(self.m,'claude_usage_live',side_effect=lambda range_key,now:self.m.claude_usage_records(self.root,self.db,now,range_key)):
+   with patch.object(sys,'argv',['plugin','--refresh-range']),patch.object(self.m,'refresh_swiftbar') as publish,patch.object(self.m,'usage_now',return_value=self.now),patch.object(self.m,'claude_usage_live',side_effect=lambda range_key,now,**_:self.m.claude_usage_records(self.root,self.db,now,range_key)):
     self.assertEqual(self.m.main(),0)
    publish.assert_called_once()
   dashboard=self.m.dashboard_payload(self.m.cached_data())
@@ -96,19 +96,71 @@ class RangeTests(unittest.TestCase):
   self.assertGreater(history['magpie']['summary']['estimatedCostUsd'],0)
   self.assertEqual(history['magpie']['models'][0]['model'],'deepseek-v4-pro')
 
- def test_magpie_only_contributes_to_summary_when_other_sources_have_no_usage(self):
-  self.m.preferences.write(self.m.STATE_DIR,dict(self.m.view_settings(),visible=['summary','magpie','claude']))
-  mp={'summary':{'requests':1,'totalTokens':20,'inputTokens':15,'cachedInputTokens':8,'cacheEligibleInputTokens':10}}
-  cc={'summary':{'requests':1,'totalTokens':30}}
-  for bundle,expected in (({'magpie':mp},True),({'magpie':mp,'claude':cc},False)):
-   d=self.m.dashboard_payload({'range_usage':dict(bundle,range='today')})
-   magpie=next(p for p in d['providers'] if p['id']=='magpie')
-   self.assertEqual(magpie['summaryIncluded'],expected)
-   self.assertEqual(magpie['tokens'],20)
-   self.assertEqual(magpie['cache'],.8)
-   if not expected:self.assertEqual(magpie['subtitle'],'未计入 Summary')
+ def test_a_gateway_counts_the_requests_its_clients_logged_too(self):
+  self.m.preferences.write(self.m.STATE_DIR,dict(self.m.view_settings(),visible=['summary','magpie','claude','codex']))
+  mp={'summary':{'requests':3,'totalTokens':300,'inputTokens':15,'cachedInputTokens':8,'cacheEligibleInputTokens':10}}
+  # Magpie carried two of ChatGPT's five requests and Claude's only one.
+  codex={'summary':{'requests':5,'totalTokens':500},'carried':{'Magpie':2},
+         'counted':{'summary':{'requests':3,'totalTokens':300},'hours':[{'timestamp':1793754000,'totalTokens':300}]},
+         'hours':[{'timestamp':1793754000,'totalTokens':500}]}
+  cc={'summary':{'requests':1,'totalTokens':100},'carried':{'Magpie':1},'counted':{'summary':{'requests':0,'totalTokens':0}}}
+  with patch.object(self.m,'usage_now',return_value=self.now):
+   d=self.m.dashboard_payload({'range_usage':{'range':'today','magpie':mp,'codex':codex,'claude':cc}})
+  p={row['id']:row for row in d['providers']}
+  self.assertTrue(p['magpie']['summaryIncluded']);self.assertEqual(p['magpie']['cache'],.8)
+  self.assertEqual(p['codex']['tokens'],500);self.assertEqual(p['codex']['counted']['tokens'],300)
+  self.assertEqual(p['codex']['subtitle'],'2 次已由 Magpie 计入')
+  self.assertFalse(p['claude']['summaryIncluded']);self.assertEqual(p['claude']['subtitle'],'已由 Magpie 计入');self.assertEqual(p['claude']['tokens'],100)
+  # Summary and its chart add every request once: Magpie's three and ChatGPT's other three.
+  self.assertEqual(sum((r.get('counted') or r)['tokens'] for r in d['providers'] if r['summaryIncluded']),600)
+  self.assertEqual(sum(p['codex']['counted']['history']),300);self.assertEqual(sum(p['codex']['history']),500)
+  # Without Magpie's figures, nothing is left to count those requests, so the clients count them again.
+  d=self.m.dashboard_payload({'range_usage':{'range':'today','magpie':{'error':'暂无用量记录'},'codex':codex,'claude':cc}})
+  p={row['id']:row for row in d['providers']}
+  self.assertNotIn('counted',p['codex']);self.assertTrue(p['claude']['summaryIncluded']);self.assertEqual(p['codex']['subtitle'],'')
+  # Two gateways at once: what OpenCodex carried returns to ChatGPT while OpenCodex shows nothing.
+  self.m.preferences.write(self.m.STATE_DIR,dict(self.m.view_settings(),visible=['summary','opencodex','magpie','codex']))
+  part=lambda n,t:{'summary':{'requests':n,'totalTokens':t,'estimatedCostUsd':t/100},'hours':[{'timestamp':1793754000,'totalTokens':t}],'firstActivityAt':1793754100}
+  codex={'summary':{'requests':6,'totalTokens':600},'carried':{'OpenCodex':2,'Magpie':1},'proxyMatched':True,'counted':part(3,300),
+         'carriedParts':{'OpenCodex':part(2,200),'Magpie':part(1,100)},'hours':[{'timestamp':1793754000,'totalTokens':600}]}
+  for ocx,expected,note in (({'error':'未配置 OpenCodex'},500,'1 次已由 Magpie 计入'),({'summary':{'requests':2,'totalTokens':200}},300,'3 次已由 OpenCodex、Magpie 计入')):
+   with patch.object(self.m,'usage_now',return_value=self.now):
+    d=self.m.dashboard_payload({'range_usage':{'range':'today','opencodex':ocx,'magpie':{'summary':{'requests':1,'totalTokens':100}},'codex':codex}})
+   c=next(r for r in d['providers'] if r['id']=='codex')
+   self.assertEqual((c['counted']['tokens'],sum(c['counted']['history']),c['counted']['cost']),(expected,expected,expected/100))
+   self.assertEqual(c['subtitle'],note)
   self.assertIn('magpie',self.m.selected_update_ids())
   self.assertNotIn('magpie',self.m.live_app_update_ids())
+
+ def codex_record(self,when,total):
+  usage=lambda n:{'input_tokens':n-10,'cached_input_tokens':40,'output_tokens':10,'total_tokens':n}
+  return {'type':'event_msg','timestamp':when,'payload':{'type':'token_count','info':{'total_token_usage':usage(total),'last_token_usage':usage(150)}}}
+
+ def test_magpie_and_its_clients_count_each_request_once(self):
+  codex=Path(self.temp.name)/'codex';magpie=Path(self.temp.name)/'magpie'
+  (codex/'sessions').mkdir(parents=True);magpie.mkdir()
+  (codex/'sessions'/'rollout.jsonl').write_text(''.join(json.dumps(r)+'\n' for r in [{'type':'session_meta','payload':{'id':'thread','model_provider':'magpie'}},
+      {'type':'turn_context','payload':{'model':'gpt-6.1-sol'}},self.codex_record('2026-11-04T01:00:00Z',150),self.codex_record('2026-11-04T02:00:00Z',300)]))
+  self.write('a.jsonl',[self.row('m1','2026-11-04T01:30:00Z')])
+  gateway={'provider':'codex','model':'gpt-6.1-sol','status':200,'ms':4000}
+  rows=[dict(gateway,agent='codex',t='2026-11-04T00:59:57Z',**{'in':100,'cache_read':40,'out':10}),
+        dict(gateway,agent='claude',model='claude-opus-5-5',t='2026-11-04T01:29:58Z',**{'in':100,'cache_read':1000,'cache_write':200,'out':20}),
+        dict(gateway,agent='codex',model='codex-auto-review',t='2026-11-04T03:00:00Z',tier_sent='priority',**{'in':9,'out':1})]
+  (magpie/'usage.jsonl').write_text(''.join(json.dumps(r)+'\n' for r in rows))
+  def read(visible):
+   self.m.preferences.write(self.m.STATE_DIR,dict(self.m.view_settings(),visible=visible,paths={'codex':str(codex),'magpie':str(magpie),'claude-app':str(self.root)}))
+   with patch.object(self.m,'usage_now',return_value=self.now),patch.object(self.m,'claude_usage_live',side_effect=lambda range_key,now,carriers=None:self.m.claude_usage_records(self.root,self.db,now,range_key,carriers=carriers)):
+    bundle=self.m.range_usage_cached('today')[0]
+   return bundle,{p['id']:p for p in self.m.dashboard_payload({'range_usage':bundle})['providers']}
+  bundle,p=read(['summary','magpie','claude','codex'])
+  self.assertEqual(p['magpie']['requests'],3);self.assertTrue(p['magpie']['summaryIncluded'])
+  self.assertEqual(p['codex']['requests'],2);self.assertEqual(p['codex']['counted']['requests'],1);self.assertEqual(p['codex']['subtitle'],'1 次已由 Magpie 计入')
+  self.assertEqual(p['claude']['requests'],1);self.assertFalse(p['claude']['summaryIncluded']);self.assertEqual(p['claude']['subtitle'],'已由 Magpie 计入')
+  # Codex's reviewer through Magpie is priced like the local record, at the tier Magpie asked for.
+  self.assertEqual(bundle['magpie']['summary']['unpricedRequests'],0)
+  # With Magpie not selected, the clients count all their own records.
+  bundle,p=read(['summary','claude','codex'])
+  self.assertNotIn('counted',p['codex']);self.assertTrue(p['claude']['summaryIncluded']);self.assertEqual(p['codex']['subtitle'],'')
 
  def test_invalid_selection_is_rejected(self):
   with self.assertRaises(ValueError):self.m.run_action('set-range',['../../bad'])

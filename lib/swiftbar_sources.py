@@ -302,9 +302,9 @@ def _stream(path):
     return process.stdout, process, timer
 
 
-def jsonl_usage(source, root, cache, start, end, zone, exclude_proxy=False, proxy_log=None, price=None):
-    """proxy_log: OpenCodex's own request log. Local records of requests it carried are dropped one by one;
-    without it, the plugin can only tell proxy sessions by their provider name."""
+def jsonl_usage(source, root, cache, start, end, zone, exclude_proxy=False, carriers=None, price=None):
+    """carriers: gateways that may have logged the same requests, with what they logged (see aggregate);
+    without OpenCodex's own log, the plugin can only tell its sessions by their provider name."""
     root = Path(root).expanduser()
     if not root.is_dir():
         return {'error': '未找到记录目录'}
@@ -370,10 +370,7 @@ def jsonl_usage(source, root, cache, start, end, zone, exclude_proxy=False, prox
             except read_errors:
                 errors += 1
         conn.commit()
-        try:carried = proxy_requests(proxy_log, cache, start, end) if proxy_log else None
-        except (OSError, ValueError, sqlite3.Error):carried = None
-        result = aggregate(unique_events(conn, start, end), start, end, zone, exclude_proxy, price or (codex_cost if source == 'codex' else model_cost), carried)
-        result['proxyMatched'] = carried is not None
+        result = aggregate(unique_events(conn, start, end), start, end, zone, exclude_proxy, price or (codex_cost if source == 'codex' else model_cost), carriers)
         if errors:
             result['warning'] = '部分记录无法读取'
             result['partial'] = True
@@ -388,23 +385,37 @@ def jsonl_usage(source, root, cache, start, end, zone, exclude_proxy=False, prox
         conn.close()
 
 
-# A local record and OpenCodex's record of one request usually finish within seconds of each other;
+# A local record and a gateway's record of one request usually finish within seconds of each other;
 # Codex's auto-review writes its record a few minutes late. The exact token split is what identifies the call.
 MATCH_WINDOW = 600
 
 
-def proxy_requests(path, cache, start, end):
-    """The requests OpenCodex logged around start..end, as (input, cached, output) tokens -> finish times.
-    Its log is appended to; when it is rewritten (new file, shorter, or another first line) the index
-    starts over, so requests it no longer reports are not held against the local records either.
-    Only these counters are kept, never request content."""
+def gateway_row(kind, row, offset):
+    """One request a gateway logged, as (id, agent, finish time, input incl. cache reads, cache reads, cache writes, output)."""
+    if kind == 'magpie':
+        event = magpie_event(row, {'offset': offset})
+        if not event or event['input'] + event['cached'] + event['writes'] + event['output'] <= 0:return None
+        return (event['id'], str(row.get('agent') or ''), event['timestamp'] + number(row.get('ms')) / 1000,
+                event['input'] + event['cached'], event['cached'], event['writes'], event['output'])
+    usage = row.get('usage')
+    if not isinstance(usage, dict):return None
+    return (identity(row.get('requestId') or offset), '', (number(row['timestamp']) + number(row.get('durationMs'))) / 1000,
+            number(usage.get('inputTokens')), number(usage.get('cachedInputTokens')), number(usage.get('cacheCreationInputTokens')),
+            number(usage.get('outputTokens')))
+
+
+def gateway_requests(path, cache, start, end, kind='opencodex'):
+    """The requests a gateway (OpenCodex or Magpie) logged around start..end, as client -> token split ->
+    finish times; the client is '' when the gateway doesn't name it. Its log is appended to; when it is
+    rewritten (new file, shorter, or another first line) the index starts over, so requests it no longer
+    reports are not held against the local records either. Only these counters are kept, never request content."""
     path = Path(path); st = path.stat()
     with path.open('rb') as handle:head = identity(handle.readline(4096).decode('utf-8', 'replace'))
-    db = Path(cache) / ('harness-ocx-v1-' + identity(str(path.resolve()))[:12] + '.sqlite3')
+    db = Path(cache) / ('harness-gateway-v1-' + kind + '-' + identity(str(path.resolve()))[:12] + '.sqlite3')
     db.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     conn = sqlite3.connect(db, timeout=10); os.chmod(db, 0o600)
     try:
-        conn.executescript('CREATE TABLE IF NOT EXISTS log(id INTEGER PRIMARY KEY CHECK(id=1), inode INTEGER, head TEXT, offset INTEGER); CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY, ts REAL, input INTEGER, cached INTEGER, output INTEGER); CREATE INDEX IF NOT EXISTS requests_ts ON requests(ts);')
+        conn.executescript('CREATE TABLE IF NOT EXISTS log(id INTEGER PRIMARY KEY CHECK(id=1), inode INTEGER, head TEXT, offset INTEGER); CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY, agent TEXT, ts REAL, input INTEGER, cached INTEGER, writes INTEGER, output INTEGER); CREATE INDEX IF NOT EXISTS requests_ts ON requests(ts);')
         known = conn.execute('SELECT inode,head,offset FROM log').fetchone()
         offset = known[2] if known and known[:2] == (st.st_ino, head) and known[2] <= st.st_size else 0
         if not offset:conn.execute('DELETE FROM requests')
@@ -415,35 +426,68 @@ def proxy_requests(path, cache, start, end):
                 if not line or not line.endswith(b'\n'):break  # Never checkpoint an incomplete tail.
                 offset += len(line)
                 try:
-                    row = json.loads(line); usage = row.get('usage')
-                    if not isinstance(usage, dict):continue
-                    finished = (number(row['timestamp']) + number(row.get('durationMs'))) / 1000
-                    conn.execute('INSERT OR REPLACE INTO requests VALUES (?,?,?,?,?)', (identity(row.get('requestId') or line.decode('utf-8', 'replace')), finished,
-                                 int(number(usage.get('inputTokens'))), int(number(usage.get('cachedInputTokens'))), int(number(usage.get('outputTokens')))))
+                    row = json.loads(line)
+                    request = gateway_row(kind, row, offset) if isinstance(row, dict) else None
+                    if request:conn.execute('INSERT OR REPLACE INTO requests VALUES (?,?,?,?,?,?,?)', request[:3] + tuple(int(value) for value in request[3:]))
                 except (KeyError, TypeError, AttributeError, ValueError):
                     continue
         conn.execute('INSERT OR REPLACE INTO log VALUES (1,?,?,?)', (st.st_ino, head, offset))
         conn.commit()
-        carried = {}
-        for finished, inputs, cached, output in conn.execute('SELECT ts,input,cached,output FROM requests WHERE ts>=? AND ts<=?', (start - MATCH_WINDOW, end + MATCH_WINDOW)):
-            carried.setdefault((inputs, cached, output), []).append(finished)
-        return carried
+        clients = {}
+        for agent, finished, *split in conn.execute('SELECT agent,ts,input,cached,writes,output FROM requests WHERE ts>=? AND ts<=?', (start - MATCH_WINDOW, end + MATCH_WINDOW)):
+            clients.setdefault(agent, {}).setdefault(tuple(split), []).append(finished)
+        return clients
     except BaseException:
         conn.rollback(); raise
     finally:
         conn.close()
 
 
-def carried_by_proxy(carried, event):
-    """Whether OpenCodex logged this very request: the same token split, finished within MATCH_WINDOW.
+def requests_from(clients, agents=None):
+    """A fresh copy of the requests these clients sent (all of them when agents is None): matching uses them up."""
+    carried = {}
+    for agent, requests in clients.items():
+        if agents is None or agent in agents:
+            for split, times in requests.items():carried.setdefault(split, []).extend(times)
+    return carried
+
+
+def carried_by(carried, event):
+    """Whether a gateway logged this very request: the same token split, finished within MATCH_WINDOW.
     Each logged request accounts for one local record only."""
-    inputs, cached, output = (int(number(event.get(k))) for k in ('input', 'cached', 'output'))
-    times = carried.get((inputs + cached, cached, output))
+    inputs, cached, writes, output = (int(number(event.get(k))) for k in ('input', 'cached', 'writes', 'output'))
+    # Gateways report input with cache reads, and some with cache writes as well.
+    times = carried.get((inputs + cached, cached, writes, output)) or (writes and carried.get((inputs + cached + writes, cached, writes, output)))
     if not times:return False
     nearest = min(times, key=lambda t:abs(t - event['timestamp']))
     if abs(nearest - event['timestamp']) > MATCH_WINDOW:return False
     times.remove(nearest)
     return True
+
+
+def split_carried(events, carriers, exclude_proxy=False, view=lambda event:event):
+    """The events no gateway carried, and those each gateway did. carriers: (name, its requests);
+    requests are None when that gateway's log can't be read here, so nothing is matched against it."""
+    counted = []; carried = {}
+    for event in events:
+        seen = view(event)
+        if exclude_proxy and str(seen.get('provider', '')).lower() in ('opencodex', 'ocx'):
+            by = 'OpenCodex'
+        else:
+            by = next((name for name, requests in carriers if requests and carried_by(requests, seen)), None)
+        if by:carried.setdefault(by, []).append(event)
+        else:counted.append(event)
+    return counted, carried
+
+
+def summary_parts(counted, carried, tally):
+    """Summary's share of a source, plus each gateway's share, which Summary adds back when that
+    gateway has nothing to show (its card can't count those requests then)."""
+    def part(events):
+        result = tally(events)
+        return {key:result[key] for key in ('summary', 'days', 'hours', 'firstActivityAt')}
+    return {'counted':part(counted), 'carried':{name:len(events) for name, events in carried.items()},
+            'carriedParts':{name:part(events) for name, events in carried.items()}}
 
 
 def forget_missing(conn, active):
@@ -458,19 +502,27 @@ def unique_events(conn, start, end):
     return (json.loads(row[0]) for row in rows)
 
 
-def aggregate(events, start, end, zone, exclude_proxy=False, price=None, carried=None):
+def aggregate(events, start, end, zone, exclude_proxy=False, price=None, carriers=None):
+    """A source's own card covers all its records. When a gateway (OpenCodex, Magpie) logged some of
+    the same requests, 'counted' holds only the rest, which is what Summary adds for this source."""
+    events = [event for event in events if start <= event['timestamp'] <= end
+              and (sum(number(event.get(k)) for k in ('input', 'output', 'cached', 'writes')) > 0 or number(event.get('credits')) > 0)]
+    result = tally(events, zone, price)
+    if exclude_proxy or carriers:
+        result.update(summary_parts(*split_carried(events, carriers or [], exclude_proxy), lambda rows:tally(rows, zone, price)))
+    result['proxyMatched'] = dict(carriers or []).get('OpenCodex') is not None
+    return result
+
+
+def tally(events, zone, price=None):
     def empty():
         return dict(totalTokens=0, inputTokens=0, outputTokens=0, cachedInputTokens=0,
                     requests=0, estimatedCostUsd=0, unpricedRequests=0, credits=0)
-    summary = empty(); models = {}; days = {}; hours = {}; sessions = set(); first = None; excluded = 0
+    summary = empty(); models = {}; days = {}; hours = {}; sessions = set(); first = None
     for event in events:
         ts = event['timestamp']
-        if not start <= ts <= end: continue
-        if (exclude_proxy and str(event.get('provider', '')).lower() in ('opencodex', 'ocx')) or (carried and carried_by_proxy(carried, event)):
-            excluded += 1; continue
         i, o, r, w = [number(event.get(k)) for k in ('input', 'output', 'cached', 'writes')]
         credits = number(event.get('credits'))
-        if i + o + r + w <= 0 and credits <= 0: continue
         cost = event.get('cost')
         if cost is None and price: cost = price(event)
         first = ts if first is None else min(first, ts)
@@ -488,10 +540,10 @@ def aggregate(events, start, end, zone, exclude_proxy=False, price=None, carried
     return {'summary': summary, 'models': [dict(v, model=k) for k,v in models.items()],
             'days': [dict(v, date=k) for k,v in sorted(days.items())],
             'hours': [dict(v, timestamp=k) for k,v in sorted(hours.items())],
-            'firstActivityAt': first, 'excludedProxyRequests': excluded}
+            'firstActivityAt': first}
 
 
-def opencode_usage(root, start, end, zone, exclude_proxy=False):
+def opencode_usage(root, start, end, zone, exclude_proxy=False, carriers=None):
     root = Path(root).expanduser(); database = root if root.is_file() else root/'opencode.db'
     if not database.is_file(): return {'error': '未找到 OpenCode 数据库'}
     conn = sqlite3.connect(database.resolve().as_uri()+'?mode=ro', uri=True, timeout=4)
@@ -506,7 +558,7 @@ def opencode_usage(root, start, end, zone, exclude_proxy=False):
                     event.update(id=identity(key), session=identity(session), timestamp=created/1000, provider=data.get('providerID',''))
                     yield event
                 except (ValueError, TypeError, AttributeError): continue
-        return aggregate(events(), start, end, zone, exclude_proxy, model_cost)
+        return aggregate(events(), start, end, zone, exclude_proxy, model_cost, carriers)
     finally:
         conn.close()
 
@@ -639,7 +691,7 @@ def gemini_event(row, state):
     return result
 
 
-def gemini_usage(root, cache, start, end, zone, exclude_proxy=False):
+def gemini_usage(root, cache, start, end, zone, exclude_proxy=False, carriers=None):
     """JSON/JSONL Gemini CLI sessions. Index usage only, including spent rewinds."""
     root = Path(root).expanduser()
     if not root.is_dir(): return {'error':'未找到 Gemini CLI 记录'}
@@ -686,7 +738,7 @@ def gemini_usage(root, cache, start, end, zone, exclude_proxy=False):
                     for e in events:db.execute('INSERT OR REPLACE INTO events VALUES (?,?,?,?)',(e['id'],file_id,e['timestamp'],json.dumps(e)))
                     db.execute('INSERT OR REPLACE INTO files VALUES (?,?,?)',(file_id,st.st_size,st.st_mtime_ns))
             except (OSError,ValueError,TypeError,KeyError):errors+=1
-        result=aggregate(unique_events(db,start,end),start,end,zone,exclude_proxy,model_cost)
+        result=aggregate(unique_events(db,start,end),start,end,zone,exclude_proxy,model_cost,carriers)
         if errors:
             result['partial']=True
             if not result['summary']['requests']:result['error']='Gemini 记录格式待检查'

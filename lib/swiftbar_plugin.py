@@ -912,14 +912,14 @@ def claude_price(model, metrics, speed='standard', geo='global', tier='standard'
     return sum(value*price for value,price in zip(metrics,CLAUDE_PRICES[match]))*factor/1e6
 
 
-def claude_usage_live(root=None, db_path=None, now=None, range_key="today"):
+def claude_usage_live(root=None, db_path=None, now=None, range_key="today", carriers=None):
     root=root or source_path('claude')
     paths,ids=claude_desktop.transcript_files(root,HOME)
     if not paths:return {'error':'Claude App 暂无可读取用量'},None
-    return claude_usage_records(root,db_path,now,range_key,paths,ids)
+    return claude_usage_records(root,db_path,now,range_key,paths,ids,carriers)
 
 
-def claude_usage_records(root, db_path=None, now=None, range_key="today", files=None, allowed_sessions=None):
+def claude_usage_records(root, db_path=None, now=None, range_key="today", files=None, allowed_sessions=None, carriers=None):
     from pathlib import Path
     root=Path(root)
     if not root.is_dir():return None,(0,'未找到 Claude App 用量记录',None)
@@ -927,29 +927,35 @@ def claude_usage_records(root, db_path=None, now=None, range_key="today", files=
     start,end=range_bounds(range_key,now)
     db_path=db_path or os.path.join(CACHE_DIR,'claude-app-usage-v3-'+hashlib.sha256(str(root.resolve()).encode()).hexdigest()[:12]+'.sqlite3')
     events,failures=claude_records.read_events(files if files is not None else root.rglob('*.jsonl'),db_path,allowed_sessions,start,end)
-    days={};hours={};models={};sessions=set();first_activity=None
-    def empty():return dict(totalTokens=0,inputTokens=0,outputTokens=0,cacheReadInputTokens=0,cacheCreationInputTokens=0,requests=0,estimatedCostUsd=0,unpricedRequests=0,recordedCostRequests=0)
-    summary=empty()
-    for row in events:
-        stamp=row['ts']
-        if not start<=stamp<=end:continue
-        i,o,w5,w1,r=row['metrics'];model=row['model']
-        cost=row['cost'] if row['cost'] is not None else claude_price(model,row['metrics'],row['speed'] or 'standard',row['geo'],row['tier'])
-        first_activity=stamp if first_activity is None else min(first_activity,stamp)
-        day=datetime.fromtimestamp(stamp,zone).date().isoformat();sessions.add(row['session'])
-        targets=[summary,models.setdefault(model,empty()),days.setdefault(day,empty())]
-        if range_key in ('today','24h'):targets.append(hours.setdefault(int(stamp//3600)*3600,empty()))
-        for target in targets:
-            target['totalTokens']+=i+o+w5+w1+r;target['inputTokens']+=i+w5+w1+r
-            target['outputTokens']+=o;target['cacheReadInputTokens']+=r;target['cacheCreationInputTokens']+=w5+w1;target['requests']+=1
-            if cost is None:target['unpricedRequests']+=1
-            else:target['estimatedCostUsd']+=cost
-            if row['cost'] is not None:target['recordedCostRequests']+=1
-    summary['sessions']=len(sessions);summary['coverageRatio']=(summary['requests']-summary['unpricedRequests'])/max(1,summary['requests'])
-    result={'summary':summary,'models':[dict(v,model=k) for k,v in models.items()],
-            'days':[dict(v,date=k) for k,v in sorted(days.items())],
-            'hours':[dict(v,timestamp=k) for k,v in sorted(hours.items())],
-            'firstActivityAt':first_activity,'source':'Claude App · 已登记会话','pricingDate':'2026-11-04','day':now.date().isoformat()}
+    events=[row for row in events if start<=row['ts']<=end]
+    def tally(rows):
+        days={};hours={};models={};sessions=set();first_activity=None
+        def empty():return dict(totalTokens=0,inputTokens=0,outputTokens=0,cacheReadInputTokens=0,cacheCreationInputTokens=0,requests=0,estimatedCostUsd=0,unpricedRequests=0,recordedCostRequests=0)
+        summary=empty()
+        for row in rows:
+            stamp=row['ts']
+            i,o,w5,w1,r=row['metrics'];model=row['model']
+            cost=row['cost'] if row['cost'] is not None else claude_price(model,row['metrics'],row['speed'] or 'standard',row['geo'],row['tier'])
+            first_activity=stamp if first_activity is None else min(first_activity,stamp)
+            day=datetime.fromtimestamp(stamp,zone).date().isoformat();sessions.add(row['session'])
+            targets=[summary,models.setdefault(model,empty()),days.setdefault(day,empty())]
+            if range_key in ('today','24h'):targets.append(hours.setdefault(int(stamp//3600)*3600,empty()))
+            for target in targets:
+                target['totalTokens']+=i+o+w5+w1+r;target['inputTokens']+=i+w5+w1+r
+                target['outputTokens']+=o;target['cacheReadInputTokens']+=r;target['cacheCreationInputTokens']+=w5+w1;target['requests']+=1
+                if cost is None:target['unpricedRequests']+=1
+                else:target['estimatedCostUsd']+=cost
+                if row['cost'] is not None:target['recordedCostRequests']+=1
+        summary['sessions']=len(sessions);summary['coverageRatio']=(summary['requests']-summary['unpricedRequests'])/max(1,summary['requests'])
+        return {'summary':summary,'models':[dict(v,model=k) for k,v in models.items()],
+                'days':[dict(v,date=k) for k,v in sorted(days.items())],
+                'hours':[dict(v,timestamp=k) for k,v in sorted(hours.items())],
+                'firstActivityAt':first_activity}
+    result=dict(tally(events),source='Claude App · 已登记会话',pricingDate='2026-11-04',day=now.date().isoformat())
+    if carriers:
+        # Requests a gateway such as Magpie also logged count once in Summary, from the gateway.
+        view=lambda row:{'input':row['metrics'][0],'output':row['metrics'][1],'writes':row['metrics'][2]+row['metrics'][3],'cached':row['metrics'][4],'timestamp':row['ts']}
+        result.update(sources.summary_parts(*sources.split_carried(events,carriers,view=view),tally))
     if failures:result.update(partial=True,warning='部分记录无法读取')
     return result,None
 
@@ -1764,6 +1770,40 @@ def magpie_price(event):
     return sources.model_cost(event)
 
 
+# The clients Magpie names in its log whose own records the plugin reads as well. Its other clients
+# (pi, Antigravity, Cline…) are not read here, so their requests are counted from Magpie alone.
+MAGPIE_AGENTS = {'codex':('codex',), 'claude':('claude','claude-code','claude-desktop'), 'opencode':('opencode',),
+                 'deepseek-harness':('dsh',), 'gemini':('gemini','gemini-cli')}
+
+def gateway_logs(enabled, start, end):
+    """What each selected gateway logged, read once per refresh: None when its log can't be read here."""
+    logs={}
+    if 'opencodex' in enabled:
+        log=ocx_request_log()
+        try:logs['OpenCodex']=sources.gateway_requests(log,CACHE_DIR,start,end) if log else None
+        except (OSError,ValueError,sources.sqlite3.Error):logs['OpenCodex']=None
+    log=os.path.join(source_path('magpie'),'usage.jsonl')
+    if 'magpie' in enabled and os.path.isfile(log):
+        try:logs['Magpie']=sources.gateway_requests(log,CACHE_DIR,start,end,'magpie')
+        except (OSError,ValueError,sources.sqlite3.Error):pass
+    return logs
+
+
+def gateway_carriers(source, logs):
+    """Gateways that may have carried this source's requests as well, with what they logged. Each gateway
+    can serve several harnesses, and one can sit behind the other, so every selected source is checked
+    against every other selected gateway; Summary counts such a request once, from the gateway."""
+    carriers=[]
+    if 'OpenCodex' in logs and source!='opencodex':
+        # OpenCodex names its client only now and then, so any selected source's requests may be in its log.
+        # Without the log, the local ChatGPT card defers to the proxy; others keep telling sessions by provider name.
+        if logs['OpenCodex'] is not None:carriers.append(('OpenCodex',sources.requests_from(logs['OpenCodex'])))
+        elif source=='codex':carriers.append(('OpenCodex',None))
+    if 'Magpie' in logs and source in MAGPIE_AGENTS:
+        carriers.append(('Magpie',sources.requests_from(logs['Magpie'],MAGPIE_AGENTS[source])))
+    return carriers
+
+
 def range_usage_cached(key=None):
     key=key or selected_range();name=range_cache_name(key)
     def load():
@@ -1773,18 +1813,19 @@ def range_usage_cached(key=None):
             try:
                 if source=='opencodex':
                     return ocx_range_usage(key,now) if ocx_configured() else {'error':'未配置 OpenCodex'}
+                carriers=gateway_carriers(source,logs)
                 if source=='claude':
-                    value,error=claude_usage_live(range_key=key,now=now)
+                    value,error=claude_usage_live(range_key=key,now=now,carriers=carriers)
                     return value or {'error':'未找到 Claude App 记录'}
                 root=source_path(source)
                 if not root:return {'error':'请选择记录目录'}
-                if source=='magpie':return sources.jsonl_usage(source,root,CACHE_DIR,start,end,now.tzinfo,price=magpie_price)
-                if source=='gemini':return sources.gemini_usage(root,CACHE_DIR,start,end,now.tzinfo,'opencodex' in enabled)
-                if source=='opencode':return sources.opencode_usage(root,start,end,now.tzinfo,'opencodex' in enabled)
-                proxy_log=ocx_request_log() if source=='codex' and 'opencodex' in enabled else None
-                return sources.jsonl_usage(source,root,CACHE_DIR,start,end,now.tzinfo,'opencodex' in enabled,proxy_log)
+                if source=='magpie':return sources.jsonl_usage(source,root,CACHE_DIR,start,end,now.tzinfo,carriers=carriers,price=magpie_price)
+                if source=='gemini':return sources.gemini_usage(root,CACHE_DIR,start,end,now.tzinfo,'opencodex' in enabled,carriers)
+                if source=='opencode':return sources.opencode_usage(root,start,end,now.tzinfo,'opencodex' in enabled,carriers)
+                return sources.jsonl_usage(source,root,CACHE_DIR,start,end,now.tzinfo,'opencodex' in enabled,carriers)
             except Exception:return {'error':'记录暂不可用'}
         bundle={'range':key,'start':start,'end':end}
+        logs=gateway_logs(enabled,start,end)
         record=read_cache(name);previous=record.get('payload') or {}
         with ThreadPoolExecutor(max_workers=max(1,len(enabled))) as pool:
             pending={source:pool.submit(collect,source) for source in enabled}
@@ -2050,7 +2091,7 @@ def background_refresh(wait=False):
 
 
 # Index generations in use; older generations, removed snapshots and stray temp files are dropped.
-CURRENT_INDEXES = ('claude-app-usage-v3-', 'harness-v4-', 'harness-gemini-v2-', 'harness-ocx-v1-')
+CURRENT_INDEXES = ('claude-app-usage-v3-', 'harness-v4-', 'harness-gemini-v2-', 'harness-gateway-v1-')
 INDEX_FILE = re.compile(r'(?:claude-app-usage|claude-usage|harness)-.+\.sqlite3(?:-journal|-wal|-shm)?')
 RETIRED_CACHES = ('startup.json', 'usage_today.json', 'usage_7d.json')
 
@@ -3076,6 +3117,21 @@ def panel_title(line):
     return line + " " + " ".join(as_option(key, value) for key, value in options.items())
 
 
+def add_usage(parts):
+    """Tallies of one source's records added up: summary fields, days and hours."""
+    total={'summary':{},'days':{},'hours':{}};first=[p['firstActivityAt'] for p in parts if p.get('firstActivityAt') is not None]
+    def add(target,row,skip=()):
+        for k,v in row.items():
+            if k not in skip and isinstance(v,(int,float)) and not isinstance(v,bool):target[k]=target.get(k,0)+v
+    for part in parts:
+        add(total['summary'],part.get('summary') or {},('coverageRatio','sessions'))
+        for field,key in (('days','date'),('hours','timestamp')):
+            for row in part.get(field) or []:add(total[field].setdefault(row.get(key),{key:row.get(key)}),row,(key,))
+    summary=total['summary']
+    summary['coverageRatio']=(summary.get('requests',0)-summary.get('unpricedRequests',0))/max(1,summary.get('requests',0))
+    return {'summary':summary,'days':list(total['days'].values()),'hours':list(total['hours'].values()),'firstActivityAt':min(first) if first else None}
+
+
 def dashboard_payload(data):
     def number(value):
         try:
@@ -3087,10 +3143,7 @@ def dashboard_payload(data):
     start,end=range_bounds(key,now)
     start=bundle.get('start',start);end=bundle.get('end',end)
     selected=[(k,label,bundle.get(k) or {}) for k,label,category in preferences.MODULES if k in preferences.USAGE and module_enabled(k)]
-    # Gateway logs and harness histories can describe the same request. Magpie can serve
-    # any harness and its logs don't share a stable request ID with those local histories.
-    magpie_separate=any(k!='magpie' and not u.get('error') and number((u.get('summary') or {}).get('requests'))>0 for k,_,u in selected)
-    usage_sources=[u for k,_,u in selected if k!='magpie' or not magpie_separate]
+    usage_sources=[u for k,_,u in selected]
     oc=bundle.get('opencodex') or {};cc=bundle.get('claude') or {}
     short=key in ('today','24h')
     if short:
@@ -3134,53 +3187,64 @@ def dashboard_payload(data):
                 'sessions':int(number(summary.get('sessions'))),'unpriced':unpriced,'models':model_rows,'history':history}
     providers=[]
     for source,label,usage in selected:
-        # Only a note that changes how to read the numbers; fixed descriptions add nothing.
-        subtitle='已排除代理重复' if source=='codex' and usage.get('excludedProxyRequests') else ''
         status='运行正常' if source=='opencodex' and data.get('healthz') else '已同步'
-        providers.append(provider(source,label,usage,subtitle,status))
-    # Codex local records and an active OpenCodex proxy can describe the same calls. Checked request by
-    # request against OpenCodex's own log, the local card keeps only the calls OpenCodex didn't carry and
-    # counts; without that log the proxy stays the summary authority.
-    proxy_available=any(p['id']=='opencodex' and p['available'] for p in providers)
-    matched={source for source,_,usage in selected if usage.get('proxyMatched')}
-    for p in providers:
-        p['summaryIncluded']=not ((p['id']=='codex' and proxy_available and 'codex' not in matched)
-                                   or (p['id']=='magpie' and magpie_separate))
-        if not p['summaryIncluded']:p['subtitle']='未计入 Summary'
+        providers.append(provider(source,label,usage,'',status))
+    # A gateway (OpenCodex, Magpie) and the client that sent a request through it both log that request.
+    # Matched request by request, the client's card still shows all its own records, while Summary adds
+    # only the ones no gateway logged; the gateway counts the rest. Without OpenCodex's own log the proxy
+    # stays the summary authority for the local ChatGPT records.
+    available={p['id'] for p in providers if p['available']}
+    for p,(source,label,usage) in zip(providers,selected):
+        carried={name:n for name,n in (usage.get('carried') or {}).items() if n and name.lower() in available}
+        # A gateway with nothing to show can't count what it carried, so the client counts those again.
+        missing=[part for name,part in (usage.get('carriedParts') or {}).items() if name not in carried]
+        counted=add_usage([usage['counted']]+missing) if usage.get('counted') and missing else usage.get('counted') or {}
+        if source=='codex' and 'opencodex' in available and not usage.get('proxyMatched'):
+            p['summaryIncluded']=False;p['subtitle']='未计入 Summary'
+        elif carried and not number((counted.get('summary') or {}).get('requests')):
+            p['summaryIncluded']=False;p['subtitle']='已由 %s 计入'%'、'.join(carried)
+        else:
+            p['summaryIncluded']=True
+            if carried:
+                part=provider(source,label,counted,'','已同步')
+                p['counted']={key:part[key] for key in ('cost','tokens','requests','unpriced','cache','history')}
+                p['subtitle']='%d 次已由 %s 计入'%(sum(carried.values()),'、'.join(carried))
+    def summary_history(p):return (p.get('counted') or p)['history']
+    def first_activity(p):
+        usage=bundle.get(p['id'],{})
+        return (usage.get('counted') if p.get('counted') else usage).get('firstActivityAt')
+    # Summary's chart draws what each source counts, so both series are rebucketed alike.
+    histories=providers+[p['counted'] for p in providers if p.get('counted')]
     # Crop only today's chart, never the statistics window. Preserve a short zero
     # lead-in before the earliest source activity, and use actual time spacing.
     chart_positions=None
     if key=='today' and slots:
-        active=[i for i in range(len(slots)) if any(p['history'][i]>0 for p in providers if p.get('summaryIncluded',True))]
+        active=[i for i in range(len(slots)) if any(summary_history(p)[i]>0 for p in providers if p['summaryIncluded'])]
         if active:
             first_index=active[0]
-            activity=[number(source.get('firstActivityAt')) for source in [bundle.get(p['id'],{}) for p in providers if p.get('summaryIncluded',True)]
-                      if source.get('firstActivityAt') is not None and start<=number(source.get('firstActivityAt'))<=end]
+            activity=[number(t) for t in (first_activity(p) for p in providers if p['summaryIncluded']) if t is not None and start<=number(t)<=end]
             first_call=min(activity) if activity else max(start,slots[first_index])
             first_call=min(first_call,end-0.001)
             padding=min(300,max(30,(end-first_call)*0.06))
             chart_start=max(start,first_call-padding)
             # A midnight request still receives a tiny visual zero lead-in.
-            chart_times=[chart_start,first_call];chart_values=[[0,0] for p in providers]
+            chart_times=[chart_start,first_call];groups=[]
             for index in range(first_index,len(slots)):
                 stamp=min(slots[index]+3600,end)
-                if len(chart_times)>2 and stamp<=chart_times[-1]:
-                    for values,p in zip(chart_values,providers):values[-1]+=p['history'][index]
-                else:
-                    chart_times.append(stamp)
-                    for values,p in zip(chart_values,providers):values.append(p['history'][index])
+                if len(chart_times)>2 and stamp<=chart_times[-1]:groups[-1].append(index)
+                else:chart_times.append(stamp);groups.append([index])
             duration=max(0.001,end-chart_start)
             chart_positions=[(stamp-chart_start)/duration for stamp in chart_times]
             if chart_positions[1]<0.01:
                 chart_positions=[0,0.04]+[0.04+0.96*x for x in chart_positions[2:]]
-            for p,values in zip(providers,chart_values):p['history']=values
+            for h in histories:h['history']=[0,0]+[sum(h['history'][i] for i in group) for group in groups]
             labels=[datetime.fromtimestamp(stamp,now.tzinfo).strftime('%H:%M') for stamp in chart_times]
             span=datetime.fromtimestamp(chart_start,now.tzinfo).strftime('%m/%d %H:%M')+'–'+datetime.fromtimestamp(end,now.tzinfo).strftime('%H:%M')
     # Keep long histories legible without dropping recorded totals from the cards.
     unit='每小时' if short else '每天'
     if len(slots)>60:
         size=int((len(slots)+59)//60)
-        for p in providers:p['history']=[sum(p['history'][i:i+size]) for i in range(0,len(slots),size)]
+        for h in histories:h['history']=[sum(h['history'][i:i+size]) for i in range(0,len(slots),size)]
         labels=[labels[i] for i in range(0,len(slots),size)];unit='每 %d 天'%size
     chart_status=('数据暂不可用' if refresh_failed(data.get('range_usage_error')) else '待同步') if not bundle else ('部分图表数据不可用' if any(p.get('error') or p.get('chartUnavailable') for p in usage_sources) else '')
     if any(p.get('historyTruncated') or p.get('entriesTruncated') for p in usage_sources):chart_status='仅含现有记录'
@@ -3241,7 +3305,7 @@ def render(data):
         overview=[]
         if module_enabled('summary'):
             valid=[p for p in dashboard['providers'] if p['available'] and p.get('summaryIncluded',True)]
-            total=sum(p['tokens'] for p in valid)
+            total=sum((p.get('counted') or p)['tokens'] for p in valid)
             overview.append(item('Summary · '+dashboard['rangeLabel']+' · '+fmt_tokens(total)+' Token' if valid else 'Summary · 数据待同步'))
         for provider in dashboard['providers']:
             overview.append(item(provider['name']+' · '+(fmt_tokens(provider['tokens'])+' Token' if provider['available'] else provider['status'])))

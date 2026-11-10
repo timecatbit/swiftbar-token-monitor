@@ -82,11 +82,12 @@ class SourceTests(unittest.TestCase):
     def test_missing_source_is_unavailable_not_zero(self):
         result=sources.jsonl_usage('codex',self.root/'missing',self.cache,0,9999999999,timezone.utc)
         self.assertIn('error',result);self.assertNotIn('summary',result)
-    def test_proxy_records_can_be_excluded_from_combined_summary(self):
+    def test_proxy_sessions_stay_on_the_card_but_leave_summary_to_opencodex(self):
         self.write(self.root/'one.jsonl',[{'type':'session_meta','payload':{'id':'proxy','model_provider':'opencodex'}},self.codex()])
         result=self.read(exclude=True)
-        self.assertEqual(result['summary']['totalTokens'],0);self.assertEqual(result['excludedProxyRequests'],1)
-        self.assertEqual(self.read(exclude=False)['summary']['totalTokens'],150)
+        self.assertEqual(result['summary']['totalTokens'],150);self.assertEqual(result['carried'],{'OpenCodex':1})
+        self.assertEqual(result['counted']['summary']['totalTokens'],0)
+        self.assertNotIn('counted',self.read(exclude=False))
     def ocx_log(self,rows,mode='w'):
         path=Path(self.temp.name)/'usage.jsonl'
         with path.open(mode) as out:out.write(''.join(json.dumps(row)+'\n' for row in rows))
@@ -97,20 +98,63 @@ class SourceTests(unittest.TestCase):
     def test_requests_opencodex_logged_are_dropped_one_by_one(self):
         self.write(self.root/'one.jsonl',[{'type':'session_meta','payload':{'id':'s','model_provider':'openai'}},
                                           self.codex(150,150,1000),self.codex(300,150,5000),self.codex(450,150,9000),self.codex(600,150,9005)])
-        read=lambda log:sources.jsonl_usage('codex',self.root,self.cache,0,9999999999,timezone.utc,True,log)
+        def read(log):
+            requests=sources.requests_from(sources.gateway_requests(log,self.cache,0,9999999999)) if log else None
+            return sources.jsonl_usage('codex',self.root,self.cache,0,9999999999,timezone.utc,True,[('OpenCodex',requests)])
         # OpenCodex carried the first call. The second went around it; the third and fourth share one logged
         # request, which accounts for only one of them; another split or a finish minutes away is not the same call.
         log=self.ocx_log([self.ocx('a',1000.4),self.ocx('b',5000,inputs=999),{'requestId':'failed','timestamp':5000000,'status':500},
                           self.ocx('c',9004),self.ocx('d',5000+1200)])
         result=read(log)
-        self.assertTrue(result['proxyMatched']);self.assertEqual(result['excludedProxyRequests'],2);self.assertEqual(result['summary']['requests'],2)
+        # The card keeps every local record; Summary takes only the calls OpenCodex never saw.
+        self.assertTrue(result['proxyMatched']);self.assertEqual(result['carried'],{'OpenCodex':2})
+        self.assertEqual(result['summary']['requests'],4);self.assertEqual(result['counted']['summary']['requests'],2)
         self.ocx_log([self.ocx('e',5001)],'a')  # Appended later: read on from where the index stopped.
-        self.assertEqual(read(log)['summary']['requests'],1)
+        self.assertEqual(read(log)['counted']['summary']['requests'],1)
         self.ocx_log([self.ocx('b',5000,inputs=999)])  # Rewritten: requests it no longer reports drop out.
-        self.assertEqual(read(log)['summary']['requests'],4)
+        self.assertEqual(read(log)['counted']['summary']['requests'],4)
         for path in self.cache.glob('*.sqlite3'):self.assertNotIn(b'SECRET-BODY',path.read_bytes())
         # Without OpenCodex's own log nothing is matched, and the plugin keeps the proxy as the authority.
-        self.assertFalse(read(None)['proxyMatched']);self.assertFalse(read(Path(self.temp.name)/'gone.jsonl')['proxyMatched'])
+        self.assertFalse(read(None)['proxyMatched'])
+    def magpie(self,finished,agent='codex',inputs=100,cached=40,output=10,**extra):
+        start=finished-12
+        return dict({'t':sources.datetime.fromtimestamp(start,timezone.utc).isoformat(),'ms':12000,'agent':agent,'provider':'codex',
+                     'model':'gpt-6.1-sol','in':inputs,'cache_read':cached,'out':output,'status':200,'native_session':'PRIVATE-THREAD'},**extra)
+    def test_magpie_requests_are_matched_to_the_client_that_sent_them(self):
+        self.write(self.root/'one.jsonl',[{'type':'session_meta','payload':{'id':'s','model_provider':'magpie'}},
+                                          self.codex(150,150,1000),self.codex(300,150,5000),self.codex(450,150,9000)])
+        log=Path(self.temp.name)/'magpie'/'usage.jsonl'
+        # Codex's own request, the same split from Claude Code (not this client), a refusal without output,
+        # and a composer prediction the local history never records.
+        self.write(log,[self.magpie(1000.5),self.magpie(5000.5,agent='claude'),self.magpie(9000.5,status=400,out=0),
+                        self.magpie(9100,inputs=7,cached=0,output=3,kind='composer_predictions')])
+        clients=sources.gateway_requests(log,self.cache,0,9999999999,'magpie')
+        self.assertEqual(set(clients),{'codex','claude'})
+        result=sources.jsonl_usage('codex',self.root,self.cache,0,9999999999,timezone.utc,carriers=[('Magpie',sources.requests_from(clients,('codex',)))])
+        self.assertEqual(result['summary']['requests'],3);self.assertEqual(result['carried'],{'Magpie':1})
+        self.assertEqual(result['counted']['summary']['requests'],2)
+        # The gateway's own card counts what it served, without the refusal.
+        card=sources.jsonl_usage('magpie',log.parent,self.cache,0,9999999999,timezone.utc)
+        self.assertEqual(card['summary']['requests'],3)
+        for path in self.cache.glob('*.sqlite3'):self.assertNotIn(b'PRIVATE-THREAD',path.read_bytes())
+    def test_a_request_through_two_gateways_and_two_gateways_at_once_count_once(self):
+        log=Path(self.temp.name)/'magpie'/'usage.jsonl'
+        # Magpie handed one request on to OpenCodex, which logged it too; the other went straight upstream.
+        self.write(log,[self.magpie(1000.5),self.magpie(5000.5,inputs=300)])
+        ocx=sources.requests_from(sources.gateway_requests(self.ocx_log([self.ocx('a',1001)]),self.cache,0,9999999999))
+        card=sources.jsonl_usage('magpie',log.parent,self.cache,0,9999999999,timezone.utc,carriers=[('OpenCodex',ocx)])
+        self.assertEqual(card['summary']['requests'],2);self.assertEqual(card['carried'],{'OpenCodex':1})
+        self.assertEqual(card['counted']['summary']['requests'],1)
+        # A client's records are checked against each gateway; each logged request is used once.
+        self.write(self.root/'one.jsonl',[self.codex(150,150,1000),self.codex(300,150,5000),self.codex(450,150,9000)])
+        carriers=[('OpenCodex',{(140,40,0,10):[5001]}),('Magpie',{(140,40,0,10):[1001,5002]})]
+        result=sources.jsonl_usage('codex',self.root,self.cache,0,9999999999,timezone.utc,carriers=carriers)
+        self.assertEqual(result['carried'],{'Magpie':1,'OpenCodex':1});self.assertEqual(result['counted']['summary']['requests'],1)
+    def test_gateway_input_may_include_cache_writes(self):
+        event={'input':100,'cached':1000,'writes':200,'output':20,'timestamp':50}
+        self.assertTrue(sources.carried_by({(1100,1000,200,20):[60]},dict(event)))
+        self.assertTrue(sources.carried_by({(1300,1000,200,20):[60]},dict(event)))
+        self.assertFalse(sources.carried_by({(1300,1000,200,20):[60]},dict(event,writes=0)))
     def test_cumulative_only_and_delta_only_records_are_not_dropped(self):
         one=self.codex(150,150,100);one['payload']['info'].pop('last_token_usage')
         two=self.codex(300,150,200);two['payload']['info'].pop('last_token_usage')
