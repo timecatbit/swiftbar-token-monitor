@@ -72,6 +72,13 @@ class SourceTests(unittest.TestCase):
         self.write(log,[later])
         self.assertEqual(self.read('magpie')['summary']['requests'],1)
 
+    def test_magpie_skips_refusals_and_prices_the_tier_it_asked_for(self):
+        base={'agent':'codex','provider':'codex','model':'gpt-6.1-sol','t':'2024-11-05T09:46:40Z','in':100,'out':10,'status':200}
+        event=lambda **row:sources.magpie_event(dict(base,**row),{'offset':1})
+        self.assertIsNone(event(status=400,out=0))
+        self.assertIsNotNone(event(status=502,out=5))  # A reply cut off after some output still used tokens.
+        self.assertEqual(event(tier_sent='priority')['tier'],'fast')
+        self.assertEqual(event(tier_sent='priority',tier_served='default')['tier'],'standard')
     def test_missing_source_is_unavailable_not_zero(self):
         result=sources.jsonl_usage('codex',self.root/'missing',self.cache,0,9999999999,timezone.utc)
         self.assertIn('error',result);self.assertNotIn('summary',result)

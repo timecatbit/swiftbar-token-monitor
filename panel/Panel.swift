@@ -29,6 +29,7 @@ func accent(_ id:String,_ view:NSView)->NSColor {
     if id=="qoder" {return .systemGreen}
     if id=="gemini" {return .systemTeal}
     if id=="deepseek-harness" {return .systemIndigo}
+    if id=="magpie" {return .systemBrown}
     return dark(view) ? NSColor(srgbRed:0.55,green:0.71,blue:0.94,alpha:1) : NSColor(srgbRed:0.32,green:0.51,blue:0.78,alpha:1)
 }
 func statusGreen(_ view:NSView)->NSColor {dark(view) ? NSColor(srgbRed:0.49,green:0.79,blue:0.61,alpha:1) : NSColor(srgbRed:0.18,green:0.49,blue:0.31,alpha:1)}

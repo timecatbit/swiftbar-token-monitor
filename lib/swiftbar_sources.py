@@ -220,17 +220,22 @@ def magpie_event(row, state):
         return None
     if not row.get('provider') or not row.get('model'):
         return None
+    # A request the upstream refused before replying produced no usage to count.
+    if number(row.get('status')) >= 400 and not number(row.get('out')):
+        return None
     # Magpie already splits fresh input, cache reads and writes, and reports
     # reasoning within output. Price the actual model, not a routing group.
     model = row.get('served') or row['model']
     event = metrics(model, row.get('in'), row.get('out'), row.get('cache_read'), row.get('cache_write'), row.get('cost'))
     timestamp = stamp(row['t'])
+    # The tier the upstream reported, else the one Magpie asked for: the local client prices by its request too.
+    tier = row.get('tier_served') or row.get('tier_sent')
     # Offsets uniquely identify distinct requests even when a gateway reuses route IDs.
     event.update(id=identity('magpie', state['offset']), timestamp=timestamp,
                  session=identity(row['session']) if row.get('session') else None,
                  write1h=min(event['writes'],number(row.get('cache_write_1h'))),
                  cacheKnown=not row.get('cache_unknown'),
-                 tier=SERVICE_TIERS.get(row.get('tier_served')), fast=row.get('tier_served')=='fast')
+                 tier=SERVICE_TIERS.get(tier), fast=tier=='fast')
     return event
 
 

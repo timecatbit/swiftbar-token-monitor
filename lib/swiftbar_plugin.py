@@ -1757,7 +1757,8 @@ def magpie_price(event):
         one_hour=event['write1h']
         return claude_price(model,(event['input'],event['output'],event['writes']-one_hour,one_hour,event['cached']),
                             speed='fast' if event['fast'] else 'standard')
-    if model.startswith(('gpt-','o1','o3','o4')):
+    # Codex's own reviewer (codex-auto-review) bills as a GPT model too.
+    if model.startswith(('gpt-','o1','o3','o4','codex-')):
         cost=sources.codex_cost(dict(event,model=model))
         if cost is not None:return cost
     return sources.model_cost(event)
