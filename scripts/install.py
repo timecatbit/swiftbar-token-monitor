@@ -152,7 +152,7 @@ def main():
     else:
         print(detected.stdout.strip())
     if not args.no_refresh:
-        subprocess.run(['open', '-g', 'swiftbar://refreshplugin?name=' + ENTRY], check=True)
+        subprocess.run(['open', '-g', 'swiftbar://refreshplugin?name=' + ENTRY.split('.')[0]], check=True)
     print('Installed:', destination / ENTRY)
 
 if __name__ == '__main__':

@@ -63,7 +63,7 @@
 - 日志索引的表结构或 ID 格式变化时提升文件名中的版本号，并同步 `CURRENT_INDEXES`，让旧索引被自动清理。时间字符串统一用 `swiftbar_time.parse_iso` 解析（独立复制的状态栏桥接脚本除外）。
 - 参考 ccusage 的适配逻辑保留 `lib/CCUSAGE_LICENSE`；Claude 用量先按 App 会话归属过滤并去重，再按日期筛选。日志未变化时复用规范化索引，改写/删除不能保留旧统计，任何情况下不以本机费用推算订阅百分比。
 - 界面改动安装后必须实际点击星星、打开受影响侧栏并查看截图，不能仅以编译通过作为视觉验证。
-- 不通过 AppleScript 启动 SwiftBar 本体；这可能弹出“已运行”提示。刷新使用 SwiftBar URL scheme。
+- 不通过 AppleScript 启动 SwiftBar 本体；这可能弹出“已运行”提示。刷新使用 SwiftBar URL scheme。`swiftbar://` 链接（刷新、通知的 plugin 参数）写 SwiftBar 的插件名 `token-monitor`（文件名第一个点之前），不写 `token-monitor.30s.sh`：稳定版 SwiftBar 2.1.0/2.1.1 只按插件名或完整路径匹配，写文件名的刷新和通知会被静默忽略，面板动作只能等每分钟的定时运行。
 - 用户配置只从 Application Support/SwiftBarToken/config.local.sh 加载；升级不自动导入仓库配置。常用连接通过主页模块的悬停侧栏设置，未配置不发请求，取消不写入；自动检测不把注释或示例地址当配置。
 - 隐藏面板不运行每秒轮询或鼠标监听；通过目录事件接收原子发布的快照/回执，打开时立即按正常时效检查。
 - 配置与凭据必须留在本机。不要提交 `config.local.sh`、运行缓存、日志、SQLite 数据或含私人用量的截图。

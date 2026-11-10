@@ -20,7 +20,7 @@ MAX_AGE=600
 SNAPSHOT='claude-code-usage.json'
 BRIDGE='integrations/claude-statusline.py'
 BACKUP='integrations/claude-statusline-original.json'
-PLUGIN_FILE='token-monitor.30s.sh'
+PLUGIN_NAME='token-monitor'  # SwiftBar's name for token-monitor.30s.sh; 2.1.x ignores the file name
 
 
 def read(path):
@@ -68,7 +68,7 @@ def publish(state,data,now=None,refresh=False):
     if 0<=age<(60 if same else 10) and (same or result['windows']):return previous
     write(path,result)
     if refresh:
-        subprocess.run(['/usr/bin/open','-g','swiftbar://refreshplugin?name='+PLUGIN_FILE],
+        subprocess.run(['/usr/bin/open','-g','swiftbar://refreshplugin?name='+PLUGIN_NAME],
                        stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=3,check=False)
     return result
 

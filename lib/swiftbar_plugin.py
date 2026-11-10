@@ -52,6 +52,9 @@ BASE = detect_base()
 NATIVE_USAGE_URL = BASE + "/#usage"
 PLUGIN = os.environ.get("OCX_PLUGIN_PATH") or (sys.argv[0] if sys.argv else "token-monitor.30s.sh")
 PLUGIN_DIR = os.path.dirname(os.path.abspath(PLUGIN))
+# swiftbar:// links name the plugin as SwiftBar does: the file name up to its first dot.
+# SwiftBar 2.1.0/2.1.1 match only that or the full path, not the whole file name.
+SWIFTBAR_NAME = os.path.basename(PLUGIN).split('.')[0]
 PANEL_APP = os.path.join(PLUGIN_DIR, ".opencodex-panel", "OpenCodexPanel.app")
 # SwiftBar runs every visible file under its plugin folder, so installed assets live in the hidden one.
 ASSET_DIR = next((path for path in (os.path.join(PLUGIN_DIR, ".opencodex-panel", "assets"), os.path.join(PLUGIN_DIR, "assets"))
@@ -1248,9 +1251,9 @@ def update_rows(data):
 
 def send_update_notification(rows):
     body='；'.join(row['name']+' '+row['latest'] for row in rows)
-    url='swiftbar://notify?'+urllib.parse.urlencode({'plugin':os.path.basename(PLUGIN),'title':'应用有新版本',
+    url='swiftbar://notify?'+urllib.parse.urlencode({'plugin':SWIFTBAR_NAME,'title':'应用有新版本',
          'body':body,'subtitle':'打开星星 → Harness 更新查看','silent':'true',
-         'href':'swiftbar://refreshplugin?name='+urllib.parse.quote(os.path.basename(PLUGIN))})
+         'href':'swiftbar://refreshplugin?name='+urllib.parse.quote(SWIFTBAR_NAME)})
     try:return subprocess.run(['/usr/bin/open','-g',url],capture_output=True,timeout=5).returncode==0
     except (OSError,subprocess.TimeoutExpired):return False
 
@@ -1815,7 +1818,7 @@ def refresh_resource(source):
     schedule_background_refresh()
 
 def refresh_swiftbar():
-    try:subprocess.run(['/usr/bin/open','-g','swiftbar://refreshplugin?name='+urllib.parse.quote(os.path.basename(PLUGIN))],capture_output=True,timeout=4)
+    try:subprocess.run(['/usr/bin/open','-g','swiftbar://refreshplugin?name='+urllib.parse.quote(SWIFTBAR_NAME)],capture_output=True,timeout=4)
     except (OSError,subprocess.SubprocessError):pass
 
 
@@ -1924,8 +1927,8 @@ def alert_notice(alert):
 
 
 def post_notice(subtitle,body):
-    url='swiftbar://notify?'+urllib.parse.urlencode({'plugin':os.path.basename(PLUGIN),'title':PRODUCT,'subtitle':subtitle,'body':body,
-         'href':'swiftbar://refreshplugin?name='+urllib.parse.quote(os.path.basename(PLUGIN))})
+    url='swiftbar://notify?'+urllib.parse.urlencode({'plugin':SWIFTBAR_NAME,'title':PRODUCT,'subtitle':subtitle,'body':body,
+         'href':'swiftbar://refreshplugin?name='+urllib.parse.quote(SWIFTBAR_NAME)})
     try:return subprocess.run(['/usr/bin/open','-g',url],capture_output=True,timeout=5).returncode==0
     except (OSError,subprocess.TimeoutExpired):return False
 
@@ -3381,7 +3384,7 @@ def run_action(name, extra):
         helptext=subprocess.run([binary,'--help'],capture_output=True,text=True,check=True,timeout=5).stdout
         if not re.search(r'^\s+update(?:\s|\|)',helptext,re.M):
             applescript('display alert "当前版本不支持 update 命令" message "请通过官方安装方式更新。"');return
-        refresh_url='swiftbar://refreshplugin?name='+urllib.parse.quote(os.path.basename(PLUGIN))
+        refresh_url='swiftbar://refreshplugin?name='+urllib.parse.quote(SWIFTBAR_NAME)
         terminal(terminal_jobs.update_command(binary,key,STATE_DIR,refresh_url))
     elif name == 'open-cli-update-log':
         if extra or not module_enabled('updates'):raise ValueError('invalid update log action')

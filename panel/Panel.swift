@@ -733,6 +733,11 @@ struct PanelInteraction {
     static func automatic(_ action:[String])->Bool {
         ["refresh-view","refresh-source"].contains(action.first ?? "")
     }
+    // SwiftBar's name for a plugin is its file name up to the first dot. SwiftBar 2.1.0/2.1.1
+    // match a swiftbar:// link only by that name or the full path, never by the whole file name.
+    static func swiftBarName(_ path:String)->String {
+        String(URL(fileURLWithPath:path).lastPathComponent.split(separator:".",omittingEmptySubsequences:false).first ?? "")
+    }
     static func mayExpire(_ action:[String],claimed:Bool)->Bool {
         // SwiftBar can miss a wake-up. A claimed user action can legitimately wait for a dialog.
         automatic(action) || isPreference(action) || !claimed
@@ -1314,7 +1319,7 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
         }catch{finishAction(id,failed:true)}
     }
     private func wakeSwiftBar(){
-        var url=URLComponents();url.scheme="swiftbar";url.host="refreshplugin";url.queryItems=[URLQueryItem(name:"name",value:URL(fileURLWithPath:pluginPath).lastPathComponent)]
+        var url=URLComponents();url.scheme="swiftbar";url.host="refreshplugin";url.queryItems=[URLQueryItem(name:"name",value:PanelInteraction.swiftBarName(pluginPath))]
         // Refresh without activating SwiftBar or taking focus from the panel.
         let quiet=NSWorkspace.OpenConfiguration();quiet.activates=false
         if let target=url.url{NSWorkspace.shared.open(target,configuration:quiet)}

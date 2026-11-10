@@ -57,6 +57,16 @@ class PanelTests(unittest.TestCase):
  def test_entry_runs_on_a_schedule_so_swiftbar_draws_no_stale_mark(self):
   # SwiftBar marks interval plugins stale (⚠️ beside the star) after a locked screen; scheduled ones it never does.
   self.assertRegex(SOURCE.read_text(),r'(?m)^# <swiftbar\.schedule>\* \* \* \* \*</swiftbar\.schedule>$')
+ def test_swiftbar_links_use_the_name_every_swiftbar_version_matches(self):
+  # SwiftBar 2.1.0/2.1.1 match a plugin by its full path or by its name (file name up to the first
+  # dot), never by token-monitor.30s.sh; links naming the file did nothing there.
+  with patch.object(self.m.subprocess,'run') as run:
+   self.m.refresh_swiftbar();self.m.post_notice('用量提醒','Claude 订阅 · 本周 已用 92%')
+  refresh,notice=(call.args[0][-1] for call in run.call_args_list)
+  self.assertEqual(refresh,'swiftbar://refreshplugin?name=token-monitor')
+  query=self.m.urllib.parse.parse_qs(self.m.urllib.parse.urlsplit(notice).query)
+  self.assertEqual(query['plugin'],['token-monitor'])
+  self.assertEqual(query['href'],['swiftbar://refreshplugin?name=token-monitor'])
  def test_menu_hierarchy_and_callback_spaces(self):
   lines=['账户管理 | sfimage=person.crop.circle','--切换 main | bash=/bin/bash param1="/tmp/path with spaces/plugin.sh" param2=--action param3=account-use param4="account one"','---','服务器监控 · 1/1 在线 | sfimage=server.rack','--● node  在线 · 长期 | href=https://example.test tooltip="在线 · CPU 1% · 内存 20%"']
   nodes=self.m.panel_entries(lines)
