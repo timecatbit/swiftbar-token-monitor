@@ -86,6 +86,18 @@ class OAuthTests(unittest.TestCase):
   with patch.dict(os.environ,{'CLAUDE_CONFIG_DIR':str(custom)}),patch.object(oauth,'keychain_data') as keychain:
    credential=oauth.credentials();keychain.assert_not_called()
   self.assertNotIn('refreshToken',credential)
+ def test_keychain_value_printed_as_hex_is_decoded(self):
+  # security -w prints hex once any byte is not printable ASCII, such as a Chinese MCP server name.
+  stored=json.dumps({'claudeAiOauth':{'accessToken':'private-token-fixture','expiresAt':(self.now+60)*1000,'scopes':['user:profile']},
+                     'mcpOAuth':{'服务':{}}},ensure_ascii=False,indent=1).encode()
+  for printed in (stored.hex().encode()+b'\n',stored.hex().upper().encode()+b'\n',stored+b'\n'):
+   done=Mock(returncode=0,stdout=printed)
+   with patch.dict(os.environ,{'CLAUDE_CONFIG_DIR':''}),patch.object(oauth.subprocess,'run',return_value=done):
+    self.assertEqual(oauth.credentials()['expires'],self.now+60)
+ def test_login_without_a_subscription_says_so(self):
+  with patch.dict(os.environ,{'CLAUDE_CONFIG_DIR':''}),patch.object(oauth,'keychain_data',return_value=json.dumps({'mcpOAuth':{}}).encode()),self.assertRaises(oauth.OAuthError) as caught:
+   oauth.credentials()
+  self.assertEqual((caught.exception.code,str(caught.exception)),('missing','请先在 Claude Code 登录订阅账户'))
  def test_missing_scope_is_not_reported_as_a_cookie_problem(self):
   with patch.dict(os.environ,{'CLAUDE_CONFIG_DIR':''}),patch.object(oauth,'keychain_data',return_value=json.dumps({'claudeAiOauth':{'accessToken':'private-token-fixture','expiresAt':(self.now+60)*1000,'scopes':[]}}).encode()),self.assertRaises(oauth.OAuthError) as caught:
    oauth.credentials()

@@ -43,6 +43,10 @@ def keychain_data():
     except (OSError,subprocess.SubprocessError):raise OAuthError('keychain','钥匙串读取未完成，请手动重试授权') from None
     if run.returncode==44:raise OAuthError('missing','请先在 Claude Code 登录订阅账户')
     if run.returncode:raise OAuthError('keychain','钥匙串未授权，请点击授权读取登录')
+    # security prints the stored value as bare hex digits when any byte is not printable
+    # ASCII (non-ASCII text, a newline, a BOM). JSON text itself is never all hex digits.
+    value=run.stdout.strip()
+    if re.fullmatch(rb'(?:[0-9A-Fa-f]{2})+',value):return bytes.fromhex(value.decode())
     return run.stdout
 
 
@@ -65,7 +69,9 @@ def credentials():
         except OSError:raise OAuthError('missing','请先在 Claude Code 登录订阅账户') from None
     try:
         if len(raw)>MAX_RESPONSE:raise ValueError()
-        oauth=json.loads(raw).get('claudeAiOauth') or {}
+        oauth=json.loads(raw).get('claudeAiOauth')
+        # Signed in with an API key, or only MCP logins stored: no subscription login to read.
+        if oauth is None:raise OAuthError('missing','请先在 Claude Code 登录订阅账户')
         token=oauth.get('accessToken');expiry=oauth.get('expiresAt')
         if not isinstance(token,str) or not re.fullmatch(r'[A-Za-z0-9._~-]{16,4096}',token):raise ValueError()
         if type(expiry) not in (int,float) or not math.isfinite(expiry):raise ValueError()
