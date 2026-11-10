@@ -25,7 +25,7 @@ struct ProviderUsage:Decodable {
         return part
     }
 }
-struct Dashboard:Decodable {var date:String;var dates:[String];var providers:[ProviderUsage];var rangeKey:String;var rangeLabel:String;var chartUnit:String;var chartSpan:String;var chartStatus:String;var updated:String?;var chartPositions:[Double]?;var showSummary:Bool?;var allowCollapse:Bool?;var expandedProviders:[String]?}
+struct Dashboard:Decodable {var date:String;var dates:[String];var providers:[ProviderUsage];var rangeKey:String;var rangeLabel:String;var chartUnit:String;var chartSpan:String;var period:[String]?;var chartStatus:String;var updated:String?;var chartPositions:[Double]?;var showSummary:Bool?;var allowCollapse:Bool?;var expandedProviders:[String]?}
 struct Project:Decodable {var name:String;var url:String}
 struct Snapshot:Decodable {var project:Project?;var dashboard:Dashboard?;var entries:[Entry];var rangeOptions:[Entry]?;var updateCount:Int?;var moduleOptions:[Entry]?;var appearance:String?;var preferences:PresentationPreferences?}
 func dark(_ view:NSView)->Bool {view.effectiveAppearance.bestMatch(from:[.darkAqua,.aqua]) == .darkAqua}
@@ -203,6 +203,17 @@ final class ShareCard:FlippedView {
         let parts=iso.split(separator:"-").compactMap{Int($0)}
         return parts.count==3 ? "\(parts[0]) 年 \(parts[1]) 月 \(parts[2]) 日" : iso
     }
+    // What the picture covers: today's date, a 24-hour window with its times, or first to last day.
+    static func period(_ d:Dashboard)->String {
+        func numbers(_ value:String)->[Int] {value.split(whereSeparator:{"-T:".contains($0)}).compactMap{Int($0)}}
+        guard d.rangeKey != "today",let bounds=d.period,bounds.count==2 else{return day(d.date)}
+        let a=numbers(bounds[0]),b=numbers(bounds[1])
+        guard a.count>=3,b.count==a.count else{return day(d.date)}
+        if a.count>=5 {return String(format:"%d/%d %02d:%02d – %d/%d %02d:%02d",a[1],a[2],a[3],a[4],b[1],b[2],b[3],b[4])}
+        if a[0] != b[0] {return "\(a[0]) 年 \(a[1]) 月 \(a[2]) 日 – \(b[0]) 年 \(b[1]) 月 \(b[2]) 日"}
+        if a[1] != b[1] {return "\(a[0]) 年 \(a[1]) 月 \(a[2]) 日 – \(b[1]) 月 \(b[2]) 日"}
+        return a[2] != b[2] ? "\(a[0]) 年 \(a[1]) 月 \(a[2]) – \(b[2]) 日" : "\(a[0]) 年 \(a[1]) 月 \(a[2]) 日"
+    }
     private func font(_ size:CGFloat,_ weight:NSFont.Weight,rounded:Bool=false)->NSFont {
         let base=NSFont.systemFont(ofSize:size,weight:weight)
         guard rounded,let descriptor=base.fontDescriptor.withDesign(.rounded) else{return base}
@@ -212,6 +223,11 @@ final class ShareCard:FlippedView {
     private func draw(_ value:String,_ rect:NSRect,_ font:NSFont,_ color:NSColor,_ align:NSTextAlignment = .left){
         let style=NSMutableParagraphStyle();style.alignment=align;style.lineBreakMode = .byTruncatingTail
         (value as NSString).draw(in:rect,withAttributes:[.font:font,.foregroundColor:color,.paragraphStyle:style])
+    }
+    // Text centred on a line by its glyph box, so different sizes side by side share one middle.
+    private func draw(_ value:String,x:CGFloat,middle:CGFloat,width:CGFloat,_ font:NSFont,_ color:NSColor,_ align:NSTextAlignment = .left){
+        let height=ceil(font.ascender-font.descender)
+        draw(value,NSRect(x:x,y:middle-height/2,width:width,height:height+2),font,color,align)
     }
     // Large figures shrink to fit their slot rather than truncate.
     private func fitted(_ value:String,_ size:CGFloat,_ weight:NSFont.Weight,room:CGFloat)->NSFont {
@@ -254,12 +270,13 @@ final class ShareCard:FlippedView {
         let quiet=NSColor.labelColor.withAlphaComponent(isDark ? 0.055 : 0.035)
         var y=card.minY+Self.inset
         // Header: what and when.
-        let day=Self.day(dashboard.date),dayFont=font(11,.semibold),pillWidth=measure(day,dayFont)+32
-        let pill=NSRect(x:right-pillWidth,y:y+1,width:pillWidth,height:24)
-        teal.withAlphaComponent(isDark ? 0.16 : 0.09).setFill();NSBezierPath(roundedRect:pill,xRadius:12,yRadius:12).fill()
+        let day=Self.period(dashboard),dayFont=font(11,.semibold),pillWidth=min(width*0.6,measure(day,dayFont)+32)
+        let pill=NSRect(x:right-pillWidth,y:y,width:pillWidth,height:26)
+        teal.withAlphaComponent(isDark ? 0.16 : 0.09).setFill();NSBezierPath(roundedRect:pill,xRadius:13,yRadius:13).fill()
         symbol("calendar",centre:NSPoint(x:pill.minX+15,y:pill.midY),size:10,color:teal)
-        draw(day,NSRect(x:pill.minX+24,y:pill.minY+4.5,width:pillWidth-30,height:15),dayFont,teal)
-        draw(Self.title(dashboard),NSRect(x:left,y:y,width:pill.minX-left-8,height:26),font(19,.bold),.labelColor)
+        draw(day,x:pill.minX+24,middle:pill.midY,width:pillWidth-32,dayFont,teal)
+        let title=Self.title(dashboard),room=pill.minX-left-10,full=measure(title,font(19,.bold))
+        draw(title,x:left,middle:pill.midY,width:room+2,font(full<=room ? 19 : max(15,floor(19*room/full)),.bold),.labelColor)
         y+=44
         // Hero: the estimate, its dollar sign set small against the figure.
         let counted=self.counted,costs=counted.compactMap{$0.cost},partial=counted.contains{$0.cost==nil || $0.unpriced>0}

@@ -191,6 +191,7 @@ class RangeTests(unittest.TestCase):
   with patch.object(self.m,'usage_now',return_value=monday):
    d=self.m.dashboard_payload({'range_usage':{'range':'week','start':start,'end':end,'opencodex':sample,'claude':sample}})
   self.assertEqual(d['providers'][0]['history'],[100]);self.assertEqual(len(d['dates']),1)
+  self.assertEqual(d['period'],['2026-11-02','2026-11-02'])
 
  def test_all_history_trims_empty_backend_calendar_prefix(self):
   self.m.write_json_cache(self.m.cache_path('view-range'),{'schema':1,'range':'all'})
@@ -198,6 +199,7 @@ class RangeTests(unittest.TestCase):
   with patch.object(self.m,'usage_now',return_value=self.now):
    d=self.m.dashboard_payload({'range_usage':{'range':'all','start':0,'end':self.now.timestamp(),'opencodex':data,'claude':data}})
   self.assertEqual(d['chartSpan'],'09/08–11/04');self.assertEqual(d['chartStatus'],'')
+  self.assertEqual(d['period'],['2026-09-08','2026-11-04'])
   self.assertEqual(sum(d['providers'][0]['history']),100)
 
  def test_today_chart_crops_inactive_prefix_but_preserves_totals(self):

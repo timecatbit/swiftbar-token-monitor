@@ -3154,10 +3154,13 @@ def dashboard_payload(data):
         labels=[datetime.fromtimestamp(stamp,now.tzinfo).strftime('%H:%M') for stamp in slots]
         if labels:labels[0]=datetime.fromtimestamp(start,now.tzinfo).strftime('%H:%M');labels[-1]=datetime.fromtimestamp(end,now.tzinfo).strftime('%H:%M')
         span=datetime.fromtimestamp(start,now.tzinfo).strftime('%m/%d %H:%M')+'–'+datetime.fromtimestamp(end,now.tzinfo).strftime('%H:%M' if key=='today' else '%m/%d %H:%M')
+        period=[datetime.fromtimestamp(stamp,now.tzinfo).strftime('%Y-%m-%dT%H:%M') for stamp in (start,end)]
     else:
         last=datetime.fromtimestamp(end,now.tzinfo).date()
         earliest=[str(day.get('date',''))[:10] for payload in usage_sources for day in payload.get('days',[]) if day.get('date') and (number(day.get('requests'))>0 or number(day.get('totalTokens'))>0)]
         first=datetime.fromtimestamp(start,now.tzinfo).date() if start else (datetime.strptime(min(earliest),'%Y-%m-%d').date() if earliest else last)
+        # The days the figures cover; the chart shows at most the last 366 of them.
+        period=[first.isoformat(),last.isoformat()]
         first=max(first,last-timedelta(days=365))
         slots=[(first+timedelta(days=n)).isoformat() for n in range((last-first).days+1)]
         labels=[day[5:].replace('-','/') for day in slots]
@@ -3258,7 +3261,7 @@ def dashboard_payload(data):
         read=datetime.fromtimestamp(min(reads),now.tzinfo)
         updated='更新时间：'+read.strftime('%H:%M' if read.date()==now.date() else '%m/%d %H:%M')
     return {'date':now.date().isoformat(),'dates':labels,'providers':providers,'rangeKey':key,'rangeLabel':RANGES[key],
-            'chartUnit':unit,'chartSpan':span,'chartStatus':chart_status,'updated':updated,'chartPositions':chart_positions,
+            'chartUnit':unit,'chartSpan':span,'period':period,'chartStatus':chart_status,'updated':updated,'chartPositions':chart_positions,
             'showSummary':module_enabled('summary'),'allowCollapse':view_settings()['allowCollapse'],'expandedProviders':view_settings()['expandedProviders']}
 
 
