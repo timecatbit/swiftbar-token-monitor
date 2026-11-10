@@ -1351,7 +1351,9 @@ def self_update_load():
     try:
         with urllib.request.urlopen(req,timeout=8) as response:body=response.read(1024*1024+1)
     except urllib.error.HTTPError as error:
-        code=error.code;error.close()
+        # Python 3.9 can't close an HTTPError that carries no response body.
+        code=error.code
+        if error.fp is not None:error.close()
         if code in (403,429):
             release=self_update_web()
             if release:return release,None
