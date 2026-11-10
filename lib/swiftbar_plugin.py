@@ -107,7 +107,10 @@ import swiftbar_desktop_updates as desktop_updates
 import swiftbar_keys as keystore
 import swiftbar_qoder as qoder
 import swiftbar_alerts as alerts
+import swiftbar_runtime
 from swiftbar_time import parse_iso
+
+swiftbar_runtime.trust_bundled_certificates()
 KOMARI_BASE_URL = connections.monitor_url(KOMARI_BASE_URL)
 STATE_DIR = os.path.expanduser(os.environ.get('OCX_STATE_DIR') or
     (os.path.join(os.environ['OCX_CACHE_DIR'], 'settings') if os.environ.get('OCX_CACHE_DIR') else
