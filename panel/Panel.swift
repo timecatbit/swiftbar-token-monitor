@@ -16,7 +16,7 @@ struct ProviderUsage:Decodable {
     var cost:Double?;var credits:Double?;var tokens:Double;var requests:Int;var output:Double;var cache:Double?;var coverage:Double?
     var sessions:Int;var unpriced:Int;var summaryIncluded:Bool?;var models:[ModelUsage];var history:[Double]
 }
-struct Dashboard:Decodable {var date:String;var dates:[String];var providers:[ProviderUsage];var rangeKey:String;var rangeLabel:String;var chartUnit:String;var chartSpan:String;var chartStatus:String;var updated:String?;var chartPositions:[Double]?;var showSummary:Bool?;var allowCollapse:Bool?;var expandedProviders:[String]?}
+struct Dashboard:Decodable {var date:String;var dates:[String];var providers:[ProviderUsage];var rangeKey:String;var rangeLabel:String;var requestedRangeLabel:String?;var chartUnit:String;var chartSpan:String;var chartStatus:String;var updated:String?;var chartPositions:[Double]?;var showSummary:Bool?;var allowCollapse:Bool?;var expandedProviders:[String]?}
 struct Project:Decodable {var name:String;var url:String}
 struct Snapshot:Decodable {var project:Project?;var dashboard:Dashboard?;var entries:[Entry];var rangeOptions:[Entry]?;var updateCount:Int?;var moduleOptions:[Entry]?;var appearance:String?;var preferences:PresentationPreferences?}
 func dark(_ view:NSView)->Bool {view.effectiveAppearance.bestMatch(from:[.darkAqua,.aqua]) == .darkAqua}
@@ -730,6 +730,13 @@ struct PanelInteraction {
     static func keepsPanelOpen(_ action:[String])->Bool {
         ["refresh-view","refresh-source","refresh","refresh-monitor","check-app-updates","set-subscription","set-range","test-api-key","retry-claude-usage"].contains(action.first ?? "") || isPreference(action)
     }
+    static func automatic(_ action:[String])->Bool {
+        ["refresh-view","refresh-source"].contains(action.first ?? "")
+    }
+    static func mayExpire(_ action:[String],claimed:Bool)->Bool {
+        // SwiftBar can miss a wake-up. A claimed user action can legitimately wait for a dialog.
+        automatic(action) || isPreference(action) || !claimed
+    }
     // While an action runs, only the row that started it says so.
     static func runningLabel(_ entry:Entry,active:[String]?)->String? {
         active?.first=="test-api-key" && entry.action==active ? "正在测试…" : nil
@@ -737,7 +744,7 @@ struct PanelInteraction {
     mutating func submit(_ action:[String])->Submission {
         guard !action.isEmpty else{return .ignored}
         guard active != nil else{active=action;return .start}
-        guard queued.count<64 else{return .ignored}
+        guard !Self.automatic(action),queued.count<64 else{return .ignored}
         if !Self.isPreference(action) && (action==active || queued.contains(action)){return .ignored}
         queued.append(action);return .queued
     }
@@ -854,7 +861,7 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
     private var rangePicker:NSPopUpButton?;private var anchoredMenuOpen=false;private var toast:(text:String,until:Date,ok:Bool)?;private var toastView:NSView?;private weak var shareButton:NSButton?;private weak var detectButton:NSButton?;private var hintTask:DispatchWorkItem?;private var hintView:NSView?;private var userApp:NSRunningApplication?;private var firstActivation=true;private var managerOnly=false
     private var snapshot:Snapshot?;private var snapshotPath="";private var pluginPath="";private var modified:Date?
     private var anchor:NSPoint = .zero;private var anchorRect:NSRect = .zero;private var scrollOffset:CGFloat=0
-    private var fallbackTimer:Timer?;private let observer=SnapshotObserver();private var actionTimeout:DispatchWorkItem?;private var reloadTask:DispatchWorkItem?;private var monitors:[Any]=[];private var pendingAction:String?;private var pendingSince:Date?
+    private var fallbackTimer:Timer?;private let observer=SnapshotObserver();private var actionTimeout:DispatchWorkItem?;private var reloadTask:DispatchWorkItem?;private var monitors:[Any]=[];private var pendingAction:String?
     private var interaction=PanelInteraction()
     private var sourceChecks:[String:Date]=[:]
     private var flyouts:[Flyout]=[];private var rows:[[String:Row]]=[];private let hoverIntent=HoverIntent();private var closeTask:DispatchWorkItem?;private var closeLevel=0
@@ -1000,9 +1007,10 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
         if !managerOnly,let dashboard=snapshot.dashboard,let choices=snapshot.rangeOptions {
             let picker=NSPopUpButton(frame:NSRect(x:inner-113,y:7.5,width:101,height:25),pullsDown:true)
             picker.controlSize = .small;picker.font = .systemFont(ofSize:11);picker.bezelStyle = .rounded
-            picker.preferredEdge = .maxY;picker.setAccessibilityLabel("统计范围 · "+dashboard.rangeLabel)
+            let label=dashboard.requestedRangeLabel ?? dashboard.rangeLabel
+            picker.preferredEdge = .maxY;picker.setAccessibilityLabel("统计范围 · "+label)
             let menu=NSMenu(title:"统计范围");menu.autoenablesItems=false;menu.delegate=self
-            let title=NSMenuItem(title:dashboard.rangeLabel,action:nil,keyEquivalent:"");menu.addItem(title)
+            let title=NSMenuItem(title:label+(label==dashboard.rangeLabel ? "" : "…"),action:nil,keyEquivalent:"");menu.addItem(title)
             for choice in choices {
                 let option=NSMenuItem(title:choice.label,action:#selector(chooseRange(_:)),keyEquivalent:"")
                 option.target=self;option.representedObject=choice.action;option.state=choice.checked==true ? .on : .off
@@ -1135,31 +1143,39 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
         closeTask=task;DispatchQueue.main.asyncAfter(deadline:.now()+delay,execute:task)
     }
     private func checkAction(){
-        guard let pendingAction else{return}
+        guard let id=pendingAction else{return}
         let receipt=URL(fileURLWithPath:snapshotPath).deletingLastPathComponent().appendingPathComponent("panel-action-receipt.json")
-        guard let data=try? Data(contentsOf:receipt),let value=try? JSONDecoder().decode(ActionReceipt.self,from:data),value.id==pendingAction else{
-            if let since=pendingSince,let active=interaction.active,PanelInteraction.isPreference(active),Date().timeIntervalSince(since)>20{abortAction()}
-            return
-        }
-        actionTimeout?.cancel();self.pendingAction=nil;pendingSince=nil;interaction.finish(value.preferences);updateFallback()
-        if value.status != "done" {
-            interaction.queued=[];reload(force:true)
-            let alert=NSAlert();alert.messageText="操作未完成";alert.informativeText="请重新打开菜单后重试。";alert.addButton(withTitle:"好");alert.runModal();return
-        }
-        reload(force:true)
+        guard let data=try? Data(contentsOf:receipt),let value=try? JSONDecoder().decode(ActionReceipt.self,from:data),value.id==id else{return}
+        finishAction(id,preferences:value.preferences,failed:value.status != "done")
+    }
+    private func finishAction(_ id:String,preferences:PresentationPreferences?=nil,failed:Bool=false){
+        guard pendingAction==id else{return}
+        let report=failed && !PanelInteraction.automatic(interaction.active ?? [])
+        actionTimeout?.cancel();pendingAction=nil;interaction.finish(preferences);updateFallback()
+        if panel.isVisible{reload(force:true)}
+        if report {showActionFailure("SwiftBar 未完成这次操作，请重试。")}
         if let next=interaction.next(){dispatchAction(next)}
+    }
+    private func showActionFailure(_ detail:String){
+        let alert=NSAlert();alert.messageText="操作未完成";alert.informativeText=detail;alert.addButton(withTitle:"好");alert.runModal()
     }
     private func activate(_ entry:Entry,row:Row,depth:Int){
         if entry.isModule,!row.configurationClick,let action=entry.action{performAction(action);return}
         if !entry.children.isEmpty{openFlyout(entry,row:row,depth:depth);return}
         // Desktop app update rows link to the installed .app, which opens the app to update itself.
         if let href=entry.href,let url=URL(string:href),url.isFileURL,url.pathExtension=="app"{
-            hide(returningFocus:false);NSWorkspace.shared.openApplication(at:url,configuration:NSWorkspace.OpenConfiguration());return
+            hide(returningFocus:false)
+            NSWorkspace.shared.openApplication(at:url,configuration:NSWorkspace.OpenConfiguration()){[weak self] _,error in
+                if error != nil{DispatchQueue.main.async{self?.showActionFailure("无法打开应用。请确认应用已安装后重试。")}}
+            };return
         }
         if let href=entry.href,let url=URL(string:href),["http","https","swiftbar"].contains(url.scheme ?? ""){
             // Web pages come to the front; SwiftBar commands run without taking focus from the user's app.
             let config=NSWorkspace.OpenConfiguration();config.activates=url.scheme != "swiftbar"
-            hide(returningFocus:!config.activates);NSWorkspace.shared.open(url,configuration:config);return
+            hide(returningFocus:!config.activates)
+            NSWorkspace.shared.open(url,configuration:config){[weak self] _,error in
+                if error != nil{DispatchQueue.main.async{self?.showActionFailure("系统无法打开此链接，请重试。")}}
+            };return
         }
         if let action=entry.action{performAction(action)}
     }
@@ -1259,11 +1275,6 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
         surface.addSubview(label);toastView=label
     }
     @objc private func chooseRange(_ item:NSMenuItem){if let action=item.representedObject as? [String]{performAction(action)}}
-    private func abortAction(){
-        actionTimeout?.cancel();pendingAction=nil;pendingSince=nil;updateFallback();interaction.active=nil;interaction.queued=[]
-        try? FileManager.default.removeItem(at:URL(fileURLWithPath:snapshotPath).deletingLastPathComponent().appendingPathComponent("panel-action.json"))
-        reload(force:true);NSSound.beep()
-    }
     private func performAction(_ action:[String]){
         switch interaction.submit(action) {
         case .start:dispatchAction(action)
@@ -1276,15 +1287,38 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
         let keepOpen=PanelInteraction.keepsPanelOpen(action)
         if !keepOpen{hide()};if keepOpen && !passive{updatePresentation()}
         let id=UUID().uuidString,request=URL(fileURLWithPath:snapshotPath).deletingLastPathComponent().appendingPathComponent("panel-action.json")
-        do{let data=try JSONSerialization.data(withJSONObject:["id":id,"action":action,"createdAt":Date().timeIntervalSince1970]);try data.write(to:request,options:.atomic);try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:request.path);pendingAction=id;pendingSince=Date();updateFallback()
-            actionTimeout?.cancel()
-            if PanelInteraction.isPreference(action){let task=DispatchWorkItem{[weak self] in if self?.pendingAction==id{self?.abortAction()}};actionTimeout=task;DispatchQueue.main.asyncAfter(deadline:.now()+20,execute:task)}
-            var url=URLComponents();url.scheme="swiftbar";url.host="refreshplugin";url.queryItems=[URLQueryItem(name:"name",value:URL(fileURLWithPath:pluginPath).lastPathComponent)]
-            // Ask SwiftBar to refresh without activating it: activating SwiftBar took focus from the panel,
-            // which then drew its inactive, greyer look until the next click.
-            let quiet=NSWorkspace.OpenConfiguration();quiet.activates=false
-            NSWorkspace.shared.open(url.url!,configuration:quiet){[weak self] _,error in if error != nil{DispatchQueue.main.async{self?.abortAction()}}}
-        }catch{abortAction()}
+        pendingAction=id
+        do{
+            let data=try JSONSerialization.data(withJSONObject:["id":id,"action":action,"createdAt":Date().timeIntervalSince1970])
+            try data.write(to:request,options:.atomic)
+            // The containing directory is private. A very fast SwiftBar can claim the request before chmod.
+            try? FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:request.path)
+            updateFallback()
+            wakeSwiftBar()
+            DispatchQueue.main.asyncAfter(deadline:.now()+0.8){[weak self] in
+                guard let self,self.pendingAction==id,FileManager.default.fileExists(atPath:request.path) else{return}
+                // Retry only the notification. SwiftBar atomically claims the same file at most once.
+                self.wakeSwiftBar()
+            }
+            let task=DispatchWorkItem{[weak self] in
+                guard let self,self.pendingAction==id else{return}
+                self.checkAction()
+                guard self.pendingAction==id else{return}
+                let claimed = !FileManager.default.fileExists(atPath:request.path)
+                guard PanelInteraction.mayExpire(action,claimed:claimed) else{return}
+                if !claimed{try? FileManager.default.removeItem(at:request)}
+                self.finishAction(id,failed:true)
+            }
+            actionTimeout=task
+            let timeout:TimeInterval=PanelInteraction.automatic(action) ? 3 : PanelInteraction.isPreference(action) ? 20 : 8
+            DispatchQueue.main.asyncAfter(deadline:.now()+timeout,execute:task)
+        }catch{finishAction(id,failed:true)}
+    }
+    private func wakeSwiftBar(){
+        var url=URLComponents();url.scheme="swiftbar";url.host="refreshplugin";url.queryItems=[URLQueryItem(name:"name",value:URL(fileURLWithPath:pluginPath).lastPathComponent)]
+        // Refresh without activating SwiftBar or taking focus from the panel.
+        let quiet=NSWorkspace.OpenConfiguration();quiet.activates=false
+        if let target=url.url{NSWorkspace.shared.open(target,configuration:quiet)}
     }
 }
 // Application entry point. The interaction tests compile the declarations above without launching the app.

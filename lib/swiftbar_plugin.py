@@ -1476,14 +1476,29 @@ def claude_usage_stale(payload):
     return False
 
 
+def claude_retry_pending():
+    if not view_settings()['claudeOAuthUsage']:return 0
+    requested=read_cache('claude-retry').get('requestedAt',0)
+    handled=(read_cache('claude_subscription').get('payload') or {}).get('handledRetryAt',0)
+    return requested if requested>handled else 0
+
+
+def claude_subscription_cached():
+    # An older request can finish after the user clicks retry. Keep the request
+    # pending until a result acknowledges its timestamp, even if the cache is now fresh.
+    if claude_retry_pending():invalidate_caches(['claude_subscription'])
+    return cached_fetch('claude_subscription',claude_subscription_load,60)
+
+
 def claude_subscription_load():
     # Code OAuth is independent of browser cookies and does not invoke a model.
     if view_settings()['claudeOAuthUsage']:
         requested=read_cache('resource-checks').get('claude-subscription',0)
         # 立即刷新用量 is an explicit retry: renew once even after a failed renewal for this login.
-        retry=read_cache('claude-retry').get('requestedAt',0)
+        retry=claude_retry_pending()
         payload,error=claude_oauth.fetch(STATE_DIR,consent=True,requested_at=max(requested,retry),force=bool(retry))
-        if retry:write_json_cache(cache_path('claude-retry'),{'schema':1})
+        handled=retry or (read_cache('claude_subscription').get('payload') or {}).get('handledRetryAt',0)
+        if handled:payload=dict(payload,handledRetryAt=handled)
         if error:payload=dict(payload,fetchError=error[1])
         # Publish errors as their own state; don't reuse a different App account.
         return payload,None
@@ -1579,11 +1594,12 @@ def claude_subscription_lines(data):
     if failed:rows.append(item('更新时间',badge='刷新失败',paneldetail=str(error[1])+('\n保留最近一次成功的数据 · '+age if windows else ''),level=1,color=WARN,size=10))
     elif windows:rows.append(item('更新时间',badge=age,paneldetail='数据待更新' if stale else None,level=1,color=MUTED,size=10))
     if view_settings()['claudeOAuthUsage']:
-        rows.append(item('立即刷新用量',level=1,sfimage='arrow.clockwise',**act('retry-claude-usage')))
-        if failed:rows.append(item('重新授权读取登录…',level=1,**act('set-claude-oauth','true')))
+        rows.append(item('立即刷新用量',badge='正在刷新…' if claude_retry_pending() else None,level=1,sfimage='arrow.clockwise',**act('retry-claude-usage')))
+        if failed:rows.append(item('重新授权读取登录…',level=1,sfimage='lock',**act('reauthorize-claude-oauth')))
     else:
         rows.append(item('启用 Claude Code 登录查询…',level=1,sfimage='arrow.triangle.2.circlepath',paneldetail='主动获取订阅用量，不读取 Cookie',**act('set-claude-oauth','true')))
-    rows.extend([item('打开 Claude',level=1,sfimage='macwindow',**act('open-claude')),
+    app=installed_app_path('Claude')
+    rows.extend([item('打开 Claude',level=1,sfimage='macwindow',href='file://'+urllib.parse.quote(app) if app else 'https://claude.ai/'),
                  item('打开订阅用量',level=1,sfimage='arrow.up.right',href=catalog.BY_KEY['claude-subscription'].url)])
     return rows
 
@@ -1680,8 +1696,8 @@ def ocx_range_usage(key,now):
         payload['chartIncomplete']=bool(timeline.get('missingMeasurements'))
     return payload
 
-def range_usage_cached():
-    key=selected_range();name=range_cache_name(key)
+def range_usage_cached(key=None):
+    key=key or selected_range();name=range_cache_name(key)
     def load():
         now=usage_now();start,end=range_bounds(key,now)
         enabled=[k for k in preferences.USAGE if module_enabled(k)]
@@ -1736,6 +1752,8 @@ def ttl_for(name):
 
 
 def loader_due(name):
+    if name=='claude_subscription' and claude_retry_pending():
+        return time.time()>=read_cache(name).get('retryAt',0)
     if name!='opencodex':return cache_due(read_cache(name),refresh_ttl(ttl_for(name)))
     health=read_cache('healthz')
     if cache_due(health,refresh_ttl(EXTERNAL_TTLS['healthz'])):return True
@@ -1752,7 +1770,7 @@ def external_loaders():
     if module_enabled('komari') and KOMARI_BASE_URL:loaders['komari']=komari_snapshot
     if module_enabled('updates') and live_app_update_ids():loaders['app_updates']=app_updates_cached
     if os.environ.get('OCX_SELF_UPDATES')!='0':loaders['self_update']=lambda:cached_fetch('self_update',self_update_load,EXTERNAL_TTLS['self_update'])
-    if module_enabled('claude-subscription'):loaders['claude_subscription']=lambda:cached_fetch('claude_subscription',claude_subscription_load,60)
+    if module_enabled('claude-subscription'):loaders['claude_subscription']=claude_subscription_cached
     if module_enabled('qoder-subscription'):loaders['qoder_subscription']=lambda:cached_fetch('qoder_subscription',lambda:(qoder.snapshot(HOME) or {'empty':True},None),EXTERNAL_TTLS['qoder_subscription'])
     # Each read starts the ChatGPT client's app-server, so a failing client waits its normal interval, not a minute.
     if module_enabled('chatgpt') and chatgpt_source()=='client' and chatgpt_configured():loaders['chatgpt']=lambda:cached_fetch('chatgpt',lambda:(sources.chatgpt_account(home=chatgpt_home()),None),EXTERNAL_TTLS['chatgpt'],retry=EXTERNAL_TTLS['chatgpt'])
@@ -1924,19 +1942,31 @@ def check_usage_alerts():
     alerts.save(STATE_DIR,marks)
 
 
-def background_refresh():
+def refresh_usage_range(wait=False):
+    """Serialize access to the indexes, independently of the slower external refreshes."""
+    os.makedirs(CACHE_DIR, mode=0o700, exist_ok=True)
+    with open(os.path.join(CACHE_DIR, 'range-refresh.lock'), 'a') as lock:
+        try:fcntl.flock(lock, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
+        except BlockingIOError:return False
+        key=selected_range()
+        if not cache_due(read_cache(range_cache_name(key)),refresh_ttl(60)):return False
+        range_usage_cached(key)
+        return True
+
+
+def background_refresh(wait=False):
     """One worker at a time, even when the menu is refreshed repeatedly."""
     try:
         os.makedirs(CACHE_DIR, mode=0o700, exist_ok=True)
         with open(os.path.join(CACHE_DIR, "refresh.lock"), "a") as lock:
             try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(lock, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
             except BlockingIOError:
                 return 0
             loaders = external_loaders()
             with ThreadPoolExecutor(max_workers=4) as pool:
                 futures = [pool.submit(loader) for name, loader in loaders.items() if loader_due(name)]
-                if cache_due(read_cache(range_cache_name()),refresh_ttl(60)):futures.append(pool.submit(range_usage_cached))
+                if cache_due(read_cache(range_cache_name()),refresh_ttl(60)):futures.append(pool.submit(refresh_usage_range))
                 if pricing_due():futures.append(pool.submit(refresh_pricing))
                 for future in futures:
                     future.result()
@@ -1976,10 +2006,13 @@ def collect_cache_garbage(now=None):
 
 
 def schedule_background_refresh():
-    if not any(loader_due(name) for name in external_loaders()) and not cache_due(read_cache(range_cache_name()),refresh_ttl(60)):
-        return
+    if any(loader_due(name) for name in external_loaders()) or cache_due(read_cache(range_cache_name()),refresh_ttl(60)):
+        launch_background('--background-refresh')
+
+
+def launch_background(mode):
     try:
-        subprocess.Popen(["/bin/bash", PLUGIN, "--background-refresh"], stdin=subprocess.DEVNULL,
+        subprocess.Popen(["/bin/bash", PLUGIN, mode], stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                          start_new_session=True, close_fds=True)
     except OSError:
@@ -2003,12 +2036,14 @@ def cached_data():
     for name in named_key_loaders():
         data[name],data[name+'_error']=cache_result(read_cache(name),ttl_for(name))
     if not chatgpt_configured():data['chatgpt']={'state':'未找到 ChatGPT 客户端登录'};data['chatgpt_error']=None
-    data["range_usage"],data["range_usage_error"]=cache_result(read_cache(range_cache_name()),refresh_ttl(60))
+    requested=selected_range()
+    data['requested_range']=requested
+    data["range_usage"],data["range_usage_error"]=cache_result(read_cache(range_cache_name(requested)),refresh_ttl(60))
     # A new time range and its totals appear together; keep the previous range
     # visible until then, provided it belongs to the same sources and settings.
     if not data['range_usage'] and not refresh_failed(data['range_usage_error']):
         previous=(read_cache('panel-view').get('dashboard') or {}).get('rangeKey')
-        if previous in RANGES and previous!=selected_range():
+        if previous in RANGES and previous!=requested:
             last,error=cache_result(read_cache(range_cache_name(previous)),refresh_ttl(60))
             if last:
                 data.update(range_usage=last,range_usage_error=error,displayed_range=previous)
@@ -2974,7 +3009,7 @@ def dashboard_payload(data):
             value=float(value)
             return value if 0<=value<1e20 else 0.0
         except (TypeError,ValueError):return 0.0
-    now=usage_now();key=data.get('displayed_range') or selected_range();bundle=data.get('range_usage') or {}
+    now=usage_now();requested=data.get('requested_range') or selected_range();key=data.get('displayed_range') or requested;bundle=data.get('range_usage') or {}
     if bundle.get('range')!=key:bundle={}
     start,end=range_bounds(key,now)
     start=bundle.get('start',start);end=bundle.get('end',end)
@@ -3079,7 +3114,11 @@ def dashboard_payload(data):
     if reads:
         read=datetime.fromtimestamp(min(reads),now.tzinfo)
         updated='更新时间：'+read.strftime('%H:%M' if read.date()==now.date() else '%m/%d %H:%M')
+    # This message is only for an explicit range change that has not completed. The
+    # usual background refreshes still leave the UI and its last good figures alone.
+    if requested!=key:chart_status='正在读取%s · 当前显示%s'%(RANGES[requested],RANGES[key])
     return {'date':now.date().isoformat(),'dates':labels,'providers':providers,'rangeKey':key,'rangeLabel':RANGES[key],
+            'requestedRange':requested,'requestedRangeLabel':RANGES[requested],
             'chartUnit':unit,'chartSpan':span,'chartStatus':chart_status,'updated':updated,'chartPositions':chart_positions,
             'showSummary':module_enabled('summary'),'allowCollapse':view_settings()['allowCollapse'],'expandedProviders':view_settings()['expandedProviders']}
 
@@ -3135,7 +3174,7 @@ def render(data):
             overview.append(item(provider['name']+' · '+(fmt_tokens(provider['tokens'])+' Token' if provider['available'] else provider['status'])))
         return "\n".join([title(),'---']+[native_menu_line(line) for line in overview+(['---'] if overview else [])+management_lines(data)+['---']+module_menu_lines()])
     write_json_cache(cache_path("panel-view"), {"schema":1,"project":{"name":PRODUCT,"url":REPOSITORY},"dashboard":dashboard,
-        "entries":resource_panel_entries(data),"rangeOptions":range_options(dashboard['rangeKey']),
+        "entries":resource_panel_entries(data),"rangeOptions":range_options(dashboard['requestedRange']),
         "moduleOptions":options,"appearance":view_settings()['appearance'],"preferences":presentation_settings(),
         "updateCount":update_attention_count(update_rows(data))})
     return "\n".join([panel_title(title()),'---']+[native_menu_line(line) for line in native_rows])
@@ -3287,20 +3326,32 @@ def run_action(name, extra):
     elif name == 'open-claude':
         if extra:raise ValueError('invalid app action')
         subprocess.run(['/usr/bin/open','-a','Claude'],check=True,timeout=5)
-    elif name == 'set-claude-oauth':
-        value=extra[0] if len(extra)==1 else ''
+    elif name in ('set-claude-oauth','reauthorize-claude-oauth'):
+        reauthorize=name=='reauthorize-claude-oauth'
+        if reauthorize and extra:raise ValueError('invalid Claude authorization action')
+        value='true' if reauthorize else extra[0] if len(extra)==1 else ''
         if value not in ('true','false'):raise ValueError('invalid Claude OAuth preference')
         if value=='true':
-            if not view_settings()['claudeOAuthUsage'] and not confirm('使用 Claude Code 登录查询用量？','读取 Claude Code 现有登录，仅向 api.anthropic.com 查询订阅用量。无需 Cookie 或模型调用。登录过期时可启动 Code 自检续期，不发送消息。\n凭据只在内存；不写入插件配置或日志。macOS 可能询问钥匙串权限。',accept='启用'):return
+            if reauthorize or not view_settings()['claudeOAuthUsage']:
+                title='重新读取 Claude Code 登录？' if reauthorize else '使用 Claude Code 登录查询用量？'
+                detail='读取 Claude Code 现有登录，仅向 api.anthropic.com 查询订阅用量。无需 Cookie 或模型调用。macOS 可能询问钥匙串权限。'
+                if reauthorize:detail+='\n如果仍提示登录格式尚未支持，请先确认 Claude Code 能正常登录。'
+                if not confirm(title,detail,accept='重新读取' if reauthorize else '启用'):return
             preferences.update(STATE_DIR,'claude-oauth','true')
             # Renewal can take half a minute, so the background worker does it, as a retry.
             write_json_cache(cache_path('claude-retry'),{'schema':1,'requestedAt':time.time()})
         else:
             preferences.update(STATE_DIR,'claude-oauth','false');claude_oauth.clear(STATE_DIR)
-        invalidate_caches(['claude_subscription']);schedule_background_refresh()
+        invalidate_caches(['claude_subscription'])
+        if value=='true':launch_background('--background-refresh-wait')
+        else:schedule_background_refresh()
     elif name == 'retry-claude-usage':
-        write_json_cache(cache_path('claude-retry'),{'schema':1,'requestedAt':time.time()})
-        invalidate_caches(['claude_subscription']);schedule_background_refresh()
+        if extra or not view_settings()['claudeOAuthUsage']:raise ValueError('invalid Claude refresh action')
+        now=time.time()
+        if 0<=now-claude_retry_pending()<5:return
+        write_json_cache(cache_path('claude-retry'),{'schema':1,'requestedAt':now})
+        invalidate_caches(['claude_subscription'])
+        launch_background('--background-refresh-wait')
     elif name == 'set-claude-live':
         value=extra[0] if len(extra)==1 else ''
         if value not in ('true','false'):raise ValueError('invalid Claude usage preference')
@@ -3359,7 +3410,8 @@ def run_action(name, extra):
         key=extra[0] if extra else "today"
         if key not in RANGES:raise ValueError("invalid range")
         write_json_cache(cache_path("view-range"),{"schema":1,"range":key})
-        schedule_background_refresh()
+        if cache_due(read_cache(range_cache_name(key)),refresh_ttl(60)):
+            launch_background('--refresh-range')
     elif name == "refresh":
         invalidate_caches([range_cache_name()] + list(EXTERNAL_TTLS) + list(named_key_loaders()))
         schedule_background_refresh()
@@ -3535,8 +3587,12 @@ def main():
         created=discovery.initialize(STATE_DIR,detected)
         print('已自动选择模块：'+', '.join(detected) if created else '保留已有模块选择')
         return 0
-    if argv and argv[0] == "--background-refresh":
-        return background_refresh()
+    if argv and argv[0] in ("--background-refresh","--background-refresh-wait"):
+        return background_refresh(wait=argv[0]=="--background-refresh-wait")
+    if argv and argv[0] == '--refresh-range':
+        refresh_usage_range(wait=True)
+        refresh_swiftbar()
+        return 0
     if argv and argv[0] == "--self-update":
         return self_update_worker(argv[1] if len(argv) > 1 else "")
     if argv and argv[0] == "--action":

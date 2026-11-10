@@ -1,8 +1,9 @@
 import test_claude as fixture
 import unittest
 from datetime import datetime,timedelta
+from pathlib import Path
 from unittest.mock import patch
-import json,time
+import fcntl,json,sys,time
 class RangeTests(unittest.TestCase):
  setUp=fixture.ClaudeTests.setUp
  row=fixture.ClaudeTests.row
@@ -58,17 +59,35 @@ class RangeTests(unittest.TestCase):
   self.m.write_json_cache(self.m.cache_path('view-range'),{'schema':1,'range':'30d'})
   old=self.m.dashboard_payload(self.m.cached_data())
   self.assertEqual(old['rangeKey'],'today')
-  self.assertEqual(next(r['action'][1] for r in self.m.range_options(old['rangeKey']) if r['checked']),'today')
+  self.assertEqual(old['requestedRange'],'30d')
+  self.assertEqual(old['chartStatus'],'正在读取近 30 天 · 当前显示当天')
+  self.assertEqual(next(r['action'][1] for r in self.m.range_options(old['requestedRange']) if r['checked']),'30d')
   store('30d',300)
   current=self.m.dashboard_payload(self.m.cached_data())
   self.assertEqual(current['rangeKey'],'30d')
   self.assertEqual(next(p['requests'] for p in current['providers'] if p['id']=='claude'),300)
+ def test_uncached_range_finishes_even_with_the_general_refresh_locked(self):
+  self.write('before-install.jsonl',[self.row('old','2026-09-01T01:00:00Z'),self.row('today')])
+  settings=self.m.preferences.read(self.m.STATE_DIR);settings['visible']=['summary','claude']
+  self.m.preferences.write(self.m.STATE_DIR,settings)
+  Path(self.m.CACHE_DIR).mkdir(parents=True,exist_ok=True)
+  with (Path(self.m.CACHE_DIR)/'refresh.lock').open('a') as external:
+   fcntl.flock(external,fcntl.LOCK_EX)
+   with patch.object(self.m,'launch_background') as launch:
+    self.m.run_action('set-range',['all'])
+   launch.assert_called_once_with('--refresh-range')
+   with patch.object(sys,'argv',['plugin','--refresh-range']),patch.object(self.m,'refresh_swiftbar') as publish,patch.object(self.m,'usage_now',return_value=self.now),patch.object(self.m,'claude_usage_live',side_effect=lambda range_key,now:self.m.claude_usage_records(self.root,self.db,now,range_key)):
+    self.assertEqual(self.m.main(),0)
+   publish.assert_called_once()
+  dashboard=self.m.dashboard_payload(self.m.cached_data())
+  self.assertEqual(dashboard['rangeKey'],'all')
+  self.assertEqual(dashboard['providers'][0]['requests'],2)
  def test_invalid_selection_is_rejected(self):
   with self.assertRaises(ValueError):self.m.run_action('set-range',['../../bad'])
  def test_range_selector_actions_are_whitelisted(self):
   self.m.write_json_cache(self.m.cache_path('panel-view'),{'schema':1,'entries':[],'rangeOptions':self.m.range_options()})
   self.m.write_json_cache(self.m.cache_path('panel-action'),{'id':'range','action':['set-range','month'],'createdAt':time.time()})
-  with patch.object(self.m,'schedule_background_refresh'):self.m.consume_panel_action()
+  with patch.object(self.m,'launch_background'):self.m.consume_panel_action()
   self.assertEqual(self.m.selected_range(),'month')
   self.assertEqual(self.m.read_cache('panel-action-receipt')['status'],'done')
 

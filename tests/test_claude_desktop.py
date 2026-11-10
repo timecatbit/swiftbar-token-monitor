@@ -102,17 +102,44 @@ class DesktopTests(unittest.TestCase):
   self.assertIn('panelusagelevel=warning',lines);self.assertIn('panelusagelevel=critical',lines)
   self.assertEqual([self.m.usage_level(v) for v in (0,69,70,89,90,100)],['normal','normal','warning','warning','critical','critical'])
   self.assertIsNone(self.m.usage_level(99,stale=True))
- def test_refresh_button_is_an_explicit_retry_but_opening_the_flyout_is_not(self):
+ def test_explicit_retry_survives_an_in_flight_background_read(self):
   preferences.update(self.m.STATE_DIR,'claude-oauth','true')
   answer=({'source':'claude-oauth','windows':[],'state':'x','stale':True},None)
-  with patch.object(self.m.claude_oauth,'fetch',return_value=answer) as fetch,patch.object(self.m,'schedule_background_refresh'):
-   self.m.claude_subscription_load();self.assertFalse(fetch.call_args.kwargs['force'])
+  def click_during_read(*args,**kwargs):
+   self.assertFalse(kwargs['force'])
    self.m.run_action('retry-claude-usage',[])
-   self.assertNotIn('正在刷新','\n'.join(self.m.claude_subscription_lines({'claude_subscription':{'source':'claude-oauth','windows':[]}})))
-   self.m.claude_subscription_load();self.assertTrue(fetch.call_args.kwargs['force'])
-   self.m.claude_subscription_load();self.assertFalse(fetch.call_args.kwargs['force'])
-  rows='\n'.join(self.m.claude_subscription_lines({'claude_subscription':{'source':'claude-oauth','windows':[]}}))
-  self.assertIn('param3=retry-claude-usage',rows)
+   return answer
+  with patch.object(self.m,'launch_background') as launch,patch.object(self.m.claude_oauth,'fetch',side_effect=click_during_read):
+   self.m.claude_subscription_cached()
+  launch.assert_called_once_with('--background-refresh-wait')
+  self.assertTrue(self.m.loader_due('claude_subscription'))
+  self.assertIn('正在刷新','\n'.join(self.m.claude_subscription_lines({'claude_subscription':answer[0]})))
+  with patch.object(self.m.claude_oauth,'fetch',return_value=answer) as fetch:
+   self.m.claude_subscription_cached()
+   self.assertTrue(fetch.call_args.kwargs['force'])
+   self.m.claude_subscription_cached()
+   fetch.assert_called_once()
+  self.assertFalse(self.m.claude_retry_pending())
+  self.assertNotIn('正在刷新','\n'.join(self.m.claude_subscription_lines({'claude_subscription':answer[0]})))
+ def test_reauthorization_for_an_enabled_login_asks_again(self):
+  preferences.update(self.m.STATE_DIR,'claude-oauth','true')
+  error=(0,'Claude Code 登录格式尚未支持',None)
+  data={'claude_subscription':{'source':'claude-oauth','windows':[]},'claude_subscription_error':error}
+  with patch.object(self.m,'installed_app_path',return_value='/Applications/Claude.app'):
+   children=self.m.panel_entries(self.m.claude_subscription_lines(data))[0]['children']
+  actions={row['label']:row for row in children}
+  self.assertEqual(actions['打开 Claude']['href'],'file:///Applications/Claude.app')
+  self.assertEqual(actions['打开订阅用量']['href'],'https://claude.ai/settings/usage')
+  self.assertEqual(actions['重新授权读取登录…']['action'],['reauthorize-claude-oauth'])
+  self.m.write_json_cache(self.m.cache_path('panel-view'),{'schema':1,'entries':[{'children':children}]})
+  for accepted in (False,True):
+   self.m.write_json_cache(self.m.cache_path('panel-action'),{'id':str(accepted),'action':['reauthorize-claude-oauth'],'createdAt':self.m.time.time()})
+   with patch.object(self.m,'confirm',return_value=accepted) as confirm,patch.object(self.m,'launch_background') as launch:
+    self.m.consume_panel_action()
+   confirm.assert_called_once()
+   self.assertEqual(launch.call_count,int(accepted))
+   self.assertEqual(bool(self.m.claude_retry_pending()),accepted)
+   self.assertEqual(self.m.read_cache('panel-action-receipt')['status'],'done')
  def test_rendering_without_a_cache_never_reads_the_code_login(self):
   preferences.update(self.m.STATE_DIR,'claude-oauth','true')
   with patch.object(self.m.claude_oauth,'fetch',side_effect=AssertionError('rendering must not query or renew')):
