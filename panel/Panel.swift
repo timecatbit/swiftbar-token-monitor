@@ -182,9 +182,9 @@ final class ShareCard:FlippedView {
     static func blockHeight(_ p:ProviderUsage)->CGFloat {60+CGFloat(max(1,p.models.count))*modelHeight+16}
     private var cardHeight:CGFloat {Self.inset+188+(dashboard.dates.count>1 ? Self.chartHeight : 0)+24+rows.reduce(0){$0+Self.blockHeight($1)}+Self.inset-20}
     init(_ dashboard:Dashboard,project:Project){
-        // Every source with data, as on the panel: Summary's sources heaviest first, then the rest.
+        // Every source with data, in the panel's order; those Summary doesn't count are tagged, not moved.
         var shown=dashboard
-        shown.providers=dashboard.providers.filter{$0.available}.sorted{($0.summaryIncluded != false ? 1 : 0,$0.tokens)>($1.summaryIncluded != false ? 1 : 0,$1.tokens)}
+        shown.providers=dashboard.providers.filter{$0.available}
         self.dashboard=shown;self.project=project
         super.init(frame:.zero)
         frame=NSRect(x:0,y:0,width:Self.width,height:Self.margin+cardHeight+Self.margin+52)
