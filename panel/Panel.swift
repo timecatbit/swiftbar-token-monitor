@@ -38,7 +38,7 @@ func accent(_ id:String,_ view:NSView)->NSColor {
     if id=="qoder" {return .systemGreen}
     if id=="gemini" {return .systemTeal}
     if id=="deepseek-harness" {return .systemIndigo}
-    if id=="magpie" {return .systemBrown}
+    if id=="magpie" {return .systemYellow}
     return dark(view) ? NSColor(srgbRed:0.55,green:0.71,blue:0.94,alpha:1) : NSColor(srgbRed:0.32,green:0.51,blue:0.78,alpha:1)
 }
 func statusGreen(_ view:NSView)->NSColor {dark(view) ? NSColor(srgbRed:0.49,green:0.79,blue:0.61,alpha:1) : NSColor(srgbRed:0.18,green:0.49,blue:0.31,alpha:1)}
@@ -289,8 +289,11 @@ final class ShareCard:FlippedView {
             c.setFill();NSBezierPath(ovalIn:NSRect(x:left,y:y+6,width:9,height:9)).fill()
             let nameFont=font(13.5,.semibold),nameWidth=min(width*0.5,ceil((p.name as NSString).size(withAttributes:[.font:nameFont]).width))
             draw(p.name,NSRect(x:left+18,y:y+1,width:nameWidth,height:18),nameFont,.labelColor)
-            if !inSummary {
-                let tag="未计入 Summary",tagFont=font(9.5,.medium),tagWidth=ceil((tag as NSString).size(withAttributes:[.font:tagFont]).width)+12
+            // A source a gateway partly counts says so, as the panel card does: its share is only the rest.
+            if !inSummary || (p.counted != nil && !p.subtitle.isEmpty) {
+                let tag=inSummary ? p.subtitle : "未计入 Summary",tagFont=font(9.5,.medium)
+                let amount=ceil((headline(p) as NSString).size(withAttributes:[.font:font(15,.semibold,rounded:true)]).width)
+                let room=right-amount-12-(left+26+nameWidth),tagWidth=min(room,ceil((tag as NSString).size(withAttributes:[.font:tagFont]).width)+12)
                 let capsule=NSRect(x:left+26+nameWidth,y:y+2,width:tagWidth,height:16)
                 NSColor.labelColor.withAlphaComponent(0.07).setFill();NSBezierPath(roundedRect:capsule,xRadius:8,yRadius:8).fill()
                 draw(tag,capsule.insetBy(dx:6,dy:2),tagFont,.secondaryLabelColor,.center)
