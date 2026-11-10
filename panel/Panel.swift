@@ -1021,6 +1021,9 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
                 option.isEnabled = true;menu.addItem(option)
             }
             picker.menu=menu;menu.delegate=self;rangePicker=picker;content.addSubview(picker)
+            // Only the snapshot marks a range. Left to itself, the button also checks the clicked option,
+            // which showed two checks while the previous range stays on screen.
+            (picker.cell as? NSPopUpButtonCell)?.altersStateOfSelectedItem=false
             // Refresh leaves the button and current data in place; duplicate actions are coalesced.
             let refresh=HintButton(frame:NSRect(x:inner-145,y:7.5,width:28,height:25))
             refresh.bezelStyle = .rounded;refresh.controlSize = .small;refresh.title=""
