@@ -174,18 +174,17 @@ final class DisclosureButton:NSButton {
 // glass, because what shows through the glass depends on each user's desktop. It covers the
 // usage that Summary counts; subscriptions, balances and keys never appear.
 final class ShareCard:FlippedView {
-    static let width:CGFloat=420,margin:CGFloat=22,inset:CGFloat=24,chartHeight:CGFloat=150,modelHeight:CGFloat=24,legendRow:CGFloat=20
+    static let width:CGFloat=420,margin:CGFloat=22,inset:CGFloat=24,heroHeight:CGFloat=282,chartHeight:CGFloat=178,modelHeight:CGFloat=22,legendRow:CGFloat=20
     let dashboard:Dashboard,project:Project
     private var rows:[ProviderUsage] {dashboard.providers}
     // Totals, chart and the share bar use what Summary counts; every source with data is listed.
     private var counted:[ProviderUsage] {rows.compactMap{$0.summaryPart}}
     private var shared:[ProviderUsage] {counted.filter{$0.tokens>0}}
-    static func blockHeight(_ p:ProviderUsage)->CGFloat {92+CGFloat(max(1,p.models.count))*modelHeight}
+    static func rowHeight(_ p:ProviderUsage)->CGFloat {94+CGFloat(max(1,p.models.count))*modelHeight}
     private var cardHeight:CGFloat {
-        let header:CGFloat=44,hero:CGFloat=88,tiles:CGFloat=88,chart=dashboard.dates.count>1 ? Self.chartHeight+22 : 0
-        let share:CGFloat=shared.isEmpty ? 0 : 60+CGFloat((shared.count+2)/3)*Self.legendRow
-        let blocks=rows.isEmpty ? 0 : rows.reduce(0){$0+Self.blockHeight($1)+10}-10
-        return Self.inset*2+header+hero+tiles+chart+share+blocks
+        let chart=dashboard.dates.count>1 ? Self.chartHeight : 0
+        let share:CGFloat=shared.isEmpty ? 0 : 74+CGFloat((shared.count+2)/3)*Self.legendRow
+        return Self.heroHeight+Self.inset+chart+share+rows.reduce(0){$0+Self.rowHeight($1)}+10
     }
     init(_ dashboard:Dashboard,project:Project){
         // Every source with data, in the panel's order; those Summary doesn't count are tagged, not moved.
@@ -252,68 +251,72 @@ final class ShareCard:FlippedView {
     }
     override func draw(_ dirtyRect:NSRect){
         let isDark=dark(self)
-        // A soft wash lit by the colours of the tools that used the most.
-        (isDark ? NSColor(srgbRed:0.05,green:0.06,blue:0.07,alpha:1) : NSColor(srgbRed:0.95,green:0.96,blue:0.97,alpha:1)).setFill();bounds.fill()
-        let glows=[teal]+counted.sorted{$0.tokens>$1.tokens}.prefix(2).map{accent($0.id,self)}
-        for (c,(fx,fy,fr)) in zip(glows,[(0.08,0.03,0.95),(1.0,0.22,0.8),(0.1,0.78,0.9)] as [(CGFloat,CGFloat,CGFloat)]){
-            let centre=NSPoint(x:bounds.width*fx,y:bounds.height*fy)
-            NSGradient(starting:c.withAlphaComponent(isDark ? 0.26 : 0.20),ending:c.withAlphaComponent(0))?.draw(fromCenter:centre,radius:0,toCenter:centre,radius:bounds.width*fr,options:[])
-        }
-        let card=NSRect(x:Self.margin,y:Self.margin,width:bounds.width-Self.margin*2,height:cardHeight),shape=NSBezierPath(roundedRect:card,xRadius:26,yRadius:26)
+        let surface=isDark ? NSColor(srgbRed:0.10,green:0.105,blue:0.115,alpha:1) : NSColor.white
+        // A quiet backdrop, so the banner at the top of the card carries the colour.
+        NSGradient(starting:isDark ? NSColor(srgbRed:0.05,green:0.07,blue:0.08,alpha:1) : NSColor(srgbRed:0.92,green:0.95,blue:0.95,alpha:1),
+                   ending:isDark ? NSColor(srgbRed:0.08,green:0.07,blue:0.10,alpha:1) : NSColor(srgbRed:0.96,green:0.95,blue:0.98,alpha:1))?.draw(in:bounds,angle:-90)
+        let card=NSRect(x:Self.margin,y:Self.margin,width:bounds.width-Self.margin*2,height:cardHeight),shape=NSBezierPath(roundedRect:card,xRadius:28,yRadius:28)
         NSGraphicsContext.saveGraphicsState()
-        let shadow=NSShadow();shadow.shadowColor=NSColor.black.withAlphaComponent(isDark ? 0.45 : 0.09);shadow.shadowBlurRadius=36;shadow.shadowOffset=NSSize(width:0,height:-12);shadow.set()
-        (isDark ? NSColor(srgbRed:0.10,green:0.105,blue:0.115,alpha:1) : .white).setFill();shape.fill()
+        let shadow=NSShadow();shadow.shadowColor=NSColor.black.withAlphaComponent(isDark ? 0.5 : 0.12);shadow.shadowBlurRadius=40;shadow.shadowOffset=NSSize(width:0,height:-16);shadow.set()
+        surface.setFill();shape.fill()
         NSGraphicsContext.restoreGraphicsState()
-        let rim=NSBezierPath(roundedRect:card.insetBy(dx:0.5,dy:0.5),xRadius:25.5,yRadius:25.5)
-        NSColor.labelColor.withAlphaComponent(isDark ? 0.11 : 0.05).setStroke();rim.lineWidth=1;rim.stroke()
         let left=card.minX+Self.inset,width=card.width-Self.inset*2,right=left+width
-        let quiet=NSColor.labelColor.withAlphaComponent(isDark ? 0.055 : 0.035)
-        var y=card.minY+Self.inset
-        // Header: what and when.
-        let day=Self.period(dashboard),dayFont=font(11,.semibold),pillWidth=min(width*0.6,measure(day,dayFont)+32)
-        let pill=NSRect(x:right-pillWidth,y:y,width:pillWidth,height:26)
-        teal.withAlphaComponent(isDark ? 0.16 : 0.09).setFill();NSBezierPath(roundedRect:pill,xRadius:13,yRadius:13).fill()
-        symbol("calendar",centre:NSPoint(x:pill.minX+15,y:pill.midY),size:10,color:teal)
-        draw(day,x:pill.minX+24,middle:pill.midY,width:pillWidth-32,dayFont,teal)
-        let title=Self.title(dashboard),room=pill.minX-left-10,full=measure(title,font(19,.bold))
-        draw(title,x:left,middle:pill.midY,width:room+2,font(full<=room ? 19 : max(15,floor(19*room/full)),.bold),.labelColor)
-        y+=44
-        // Hero: the estimate, its dollar sign set small against the figure.
+        let quiet=NSColor.labelColor.withAlphaComponent(isDark ? 0.07 : 0.05)
+        // Banner: title, period, the estimate and three figures in white on deep teal.
+        let banner=NSRect(x:card.minX,y:card.minY,width:card.width,height:Self.heroHeight)
+        NSGraphicsContext.saveGraphicsState();shape.addClip();NSBezierPath(rect:banner).addClip()
+        NSGradient(starting:isDark ? NSColor(srgbRed:0.05,green:0.25,blue:0.28,alpha:1) : NSColor(srgbRed:0.07,green:0.33,blue:0.36,alpha:1),
+                   ending:isDark ? NSColor(srgbRed:0.11,green:0.40,blue:0.40,alpha:1) : NSColor(srgbRed:0.16,green:0.52,blue:0.50,alpha:1))?.draw(in:banner,angle:-35)
+        if let lead=counted.max(by:{$0.tokens<$1.tokens}) {
+            let glow=NSPoint(x:banner.maxX-40,y:banner.minY+50)
+            NSGradient(starting:accent(lead.id,self).withAlphaComponent(0.30),ending:accent(lead.id,self).withAlphaComponent(0))?.draw(fromCenter:glow,radius:0,toCenter:glow,radius:200,options:[])
+        }
+        symbol("star.fill",centre:NSPoint(x:banner.maxX-40,y:banner.minY+70),size:150,color:NSColor.white.withAlphaComponent(0.12),weight:.bold)
+        NSGraphicsContext.restoreGraphicsState()
+        let white=NSColor.white,soft=NSColor.white.withAlphaComponent(0.74)
+        var y=card.minY+26
+        draw(Self.title(dashboard),NSRect(x:left,y:y,width:width,height:26),font(20,.bold),white)
+        let period=Self.period(dashboard),periodFont=font(11.5,.semibold),pill=NSRect(x:left,y:y+34,width:min(width,measure(period,periodFont)+34),height:24)
+        white.withAlphaComponent(0.15).setFill();NSBezierPath(roundedRect:pill,xRadius:12,yRadius:12).fill()
+        symbol("calendar",centre:NSPoint(x:pill.minX+15,y:pill.midY),size:10,color:white)
+        draw(period,x:pill.minX+25,middle:pill.midY,width:pill.width-32,periodFont,white)
+        y+=78
         let counted=self.counted,costs=counted.compactMap{$0.cost},partial=counted.contains{$0.cost==nil || $0.unpriced>0}
-        draw(partial ? "已知 API 等值估算" : "API 等值估算",NSRect(x:left,y:y,width:width,height:16),font(11.5,.medium),.secondaryLabelColor)
+        draw(partial ? "已知 API 等值估算" : "API 等值估算",NSRect(x:left,y:y,width:width,height:16),font(12,.medium),soft)
         let hero=NSMutableAttributedString()
         if let total=costs.isEmpty ? nil : costs.reduce(0,+) {
-            hero.append(NSAttributedString(string:"$",attributes:[.font:font(26,.semibold,rounded:true),.foregroundColor:NSColor.secondaryLabelColor,.baselineOffset:15]))
-            hero.append(NSAttributedString(string:Self.dollars.string(from:NSNumber(value:total)) ?? String(money(total).dropFirst()),attributes:[.font:font(50,.bold,rounded:true),.foregroundColor:NSColor.labelColor,.kern:-0.6]))
-        } else {hero.append(NSAttributedString(string:"—",attributes:[.font:font(50,.bold,rounded:true),.foregroundColor:NSColor.labelColor]))}
-        hero.draw(in:NSRect(x:left-2,y:y+16,width:width,height:64))
-        y+=88
-        // Three figures, each with its own small symbol.
+            hero.append(NSAttributedString(string:"$",attributes:[.font:font(28,.semibold,rounded:true),.foregroundColor:soft,.baselineOffset:17]))
+            hero.append(NSAttributedString(string:Self.dollars.string(from:NSNumber(value:total)) ?? String(money(total).dropFirst()),attributes:[.font:font(54,.bold,rounded:true),.foregroundColor:white,.kern:-0.8]))
+        } else {hero.append(NSAttributedString(string:"—",attributes:[.font:font(54,.bold,rounded:true),.foregroundColor:white]))}
+        hero.draw(in:NSRect(x:left-2,y:y+16,width:width,height:70))
+        y+=96
         let count=NumberFormatter();count.numberStyle = .decimal
         // Cache hit rate weighted by each tool's tokens; tools that report none are left out.
         let cached=counted.filter{$0.cache != nil},weight=cached.reduce(0){$0+$1.tokens}
         let hit=weight>0 ? String(format:"%.1f%%",cached.reduce(0){$0+($1.cache ?? 0)*$1.tokens}/weight*100) : "—"
-        let tiles=[("square.stack.3d.up.fill","Token",tokens(counted.reduce(0){$0+$1.tokens})),
-                   ("arrow.up.arrow.down","请求",count.string(from:NSNumber(value:counted.reduce(0){$0+$1.requests})) ?? "0"),
-                   ("bolt.fill","缓存命中",hit)]
-        let tileWidth=(width-20)/3
-        for (i,(icon,label,value)) in tiles.enumerated(){
-            let tile=NSRect(x:left+CGFloat(i)*(tileWidth+10),y:y,width:tileWidth,height:66)
-            quiet.setFill();NSBezierPath(roundedRect:tile,xRadius:16,yRadius:16).fill()
-            symbol(icon,centre:NSPoint(x:tile.minX+19,y:tile.minY+19),size:10,color:teal)
-            draw(label,NSRect(x:tile.minX+30,y:tile.minY+11.5,width:tile.width-40,height:15),font(10.5,.medium),.secondaryLabelColor)
-            draw(value,NSRect(x:tile.minX+13,y:tile.minY+31,width:tile.width-24,height:26),fitted(value,20,.semibold,room:tile.width-26),.labelColor)
+        let figures=[("square.stack.3d.up.fill","Token",tokens(counted.reduce(0){$0+$1.tokens})),
+                     ("arrow.up.arrow.down","请求",count.string(from:NSNumber(value:counted.reduce(0){$0+$1.requests})) ?? "0"),
+                     ("bolt.fill","缓存命中",hit)]
+        let strip=NSRect(x:left,y:y,width:width,height:62),column=strip.width/3
+        white.withAlphaComponent(0.12).setFill();NSBezierPath(roundedRect:strip,xRadius:16,yRadius:16).fill()
+        for (i,(icon,label,value)) in figures.enumerated(){
+            let x=strip.minX+CGFloat(i)*column
+            if i>0{line(NSPoint(x:x,y:strip.minY+14),NSPoint(x:x,y:strip.maxY-14),color:white.withAlphaComponent(0.2),width:1)}
+            symbol(icon,centre:NSPoint(x:x+21,y:strip.minY+18),size:9.5,color:soft)
+            draw(label,x:x+30,middle:strip.minY+18,width:column-36,font(10.5,.medium),soft)
+            draw(value,NSRect(x:x+14,y:strip.minY+28,width:column-22,height:26),fitted(value,20,.semibold,room:column-24),white)
         }
-        y+=88
-        // Chart: the total as a soft area, each tool as a thin line in its own colour.
+        y=banner.maxY+Self.inset
+        // Trend: the total as a soft area, each tool as a thin line in its own colour.
         let n=dashboard.dates.count
         if n>1 {
+            draw("用量趋势",NSRect(x:left,y:y,width:width/2,height:16),font(12.5,.semibold),.labelColor)
+            draw(dashboard.chartUnit+" · Token",NSRect(x:right-160,y:y+1,width:160,height:14),font(10,.medium),.tertiaryLabelColor,.right)
             let series=counted.map{p in (0..<n).map{i in i<p.history.count ? max(0,p.history[i]) : 0}}
             // Same scale as the panel: a rounded ceiling with labelled half and full grid lines.
             let observed=max((0..<n).map{i in series.reduce(0){$0+$1[i]}}.max() ?? 0,1),unit=pow(10,floor(log10(observed)))
             let ceiling=ceil(observed*1.08/unit*2)/2*unit
-            let plot=NSRect(x:left,y:y+16,width:width,height:Self.chartHeight-46),axisFont=font(9.5,.medium,rounded:true)
-            draw(dashboard.chartUnit+" · Token",NSRect(x:right-160,y:y-2,width:160,height:13),font(9.5,.medium),.tertiaryLabelColor,.right)
+            let plot=NSRect(x:left,y:y+38,width:width,height:Self.chartHeight-90),axisFont=font(9.5,.medium,rounded:true)
             for f in [CGFloat(0),0.5,1]{
                 let yy=plot.maxY-f*plot.height,grid=NSBezierPath()
                 grid.move(to:NSPoint(x:plot.minX,y:yy));grid.line(to:NSPoint(x:plot.maxX,y:yy))
@@ -332,7 +335,6 @@ final class ShareCard:FlippedView {
                 curve.lineWidth=isTotal ? 2.4 : 1.3;curve.lineCapStyle = .round;curve.lineJoinStyle = .round
                 (isTotal ? teal : accent(counted[i].id,self).withAlphaComponent(0.85)).setStroke();curve.stroke()
             }
-            let surface=isDark ? NSColor(srgbRed:0.10,green:0.105,blue:0.115,alpha:1) : NSColor.white
             for f in [0.5,1.0]{
                 let label=axisTokens(ceiling*f),yy=plot.maxY-CGFloat(f)*plot.height
                 surface.withAlphaComponent(0.85).setFill();NSBezierPath(roundedRect:NSRect(x:left-3,y:yy-14,width:measure(label,axisFont)+6,height:13),xRadius:3,yRadius:3).fill()
@@ -348,14 +350,14 @@ final class ShareCard:FlippedView {
                 let x=plot.minX+CGFloat(positions[i])*plot.width,align:NSTextAlignment=i==0 ? .left : (i==n-1 ? .right : .center)
                 draw(dashboard.dates[i],NSRect(x:i==0 ? x : (i==n-1 ? x-80 : x-40),y:plot.maxY+8,width:80,height:13),labelFont,.tertiaryLabelColor,align)
             }
-            y+=Self.chartHeight+22
+            y+=Self.chartHeight
         }
         // Share of tokens: one bar in the tools' colours, then a key that names each colour.
         let sum=max(counted.reduce(0){$0+$1.tokens},1),shared=self.shared
         if !shared.isEmpty {
-            draw("Token 占比",NSRect(x:left,y:y,width:width,height:15),font(11,.semibold),.secondaryLabelColor)
-            let bar=NSRect(x:left,y:y+24,width:width,height:10)
-            NSGraphicsContext.saveGraphicsState();NSBezierPath(roundedRect:bar,xRadius:5,yRadius:5).addClip()
+            draw("Token 占比",NSRect(x:left,y:y,width:width,height:16),font(12.5,.semibold),.labelColor)
+            let bar=NSRect(x:left,y:y+28,width:width,height:12)
+            NSGraphicsContext.saveGraphicsState();NSBezierPath(roundedRect:bar,xRadius:6,yRadius:6).addClip()
             quiet.setFill();bar.fill()
             // A small share still shows as a sliver; the largest one gives up the room.
             var widths=shared.map{max(10,bar.width*CGFloat($0.tokens/sum))}
@@ -374,42 +376,46 @@ final class ShareCard:FlippedView {
                 draw(name,NSRect(x:x+12,y:ky,width:nameWidth,height:15),keyFont,.labelColor)
                 draw(percent,NSRect(x:x+16+nameWidth,y:ky,width:column-nameWidth-16,height:15),shareFont,.secondaryLabelColor)
             }
-            y+=60+CGFloat((shared.count+2)/3)*Self.legendRow
+            y+=74+CGFloat((shared.count+2)/3)*Self.legendRow
         }
-        // Each tool on its own tile: what it cost, its share and stats, then every model.
+        // Each tool as a row of a list: what it cost, its share and stats, then every model with an inline bar.
         for p in rows {
-            let c=accent(p.id,self),inSummary=p.summaryIncluded != false,block=NSRect(x:left,y:y,width:width,height:Self.blockHeight(p))
-            quiet.setFill();NSBezierPath(roundedRect:block,xRadius:18,yRadius:18).fill()
-            let il=block.minX+16,ir=block.maxX-16,iw=ir-il,top=block.minY+16
-            c.withAlphaComponent(inSummary ? 1 : 0.45).setFill();NSBezierPath(roundedRect:NSRect(x:il,y:top+3,width:4,height:15),xRadius:2,yRadius:2).fill()
-            let nameFont=font(14.5,.semibold),amount=amount(p),amountFont=font(17,.semibold,rounded:true),amountWidth=measure(amount,amountFont)
-            let nameWidth=min(iw*0.5,measure(p.name,nameFont))
-            draw(p.name,NSRect(x:il+12,y:top,width:nameWidth,height:20),nameFont,.labelColor)
+            let c=accent(p.id,self),inSummary=p.summaryIncluded != false,top=y+18
+            line(NSPoint(x:left,y:y),NSPoint(x:right,y:y),color:NSColor.labelColor.withAlphaComponent(isDark ? 0.12 : 0.08),width:1)
+            let ring=NSBezierPath(ovalIn:NSRect(x:left+1.5,y:top+4.5,width:11,height:11))
+            c.withAlphaComponent(inSummary ? 1 : 0.4).setStroke();ring.lineWidth=3;ring.stroke()
+            let nameFont=font(15,.semibold),amount=amount(p),amountFont=font(17,.semibold,rounded:true),amountWidth=measure(amount,amountFont)
+            let nameWidth=min(width*0.45,measure(p.name,nameFont))
+            draw(p.name,x:left+22,middle:top+10,width:nameWidth+2,nameFont,.labelColor)
             // A source a gateway partly counts says so, as the panel card does: its share is only the rest.
             if !inSummary || (p.counted != nil && !p.subtitle.isEmpty) {
                 let tag=inSummary ? p.subtitle : "未计入 Summary",tagFont=font(9.5,.medium)
-                let room=ir-amountWidth-10-(il+20+nameWidth),tagWidth=min(room,measure(tag,tagFont)+14)
-                let capsule=NSRect(x:il+20+nameWidth,y:top+2,width:tagWidth,height:17)
-                NSColor.labelColor.withAlphaComponent(isDark ? 0.09 : 0.06).setFill();NSBezierPath(roundedRect:capsule,xRadius:8.5,yRadius:8.5).fill()
-                draw(tag,capsule.insetBy(dx:7,dy:2),tagFont,.secondaryLabelColor,.center)
+                let room=right-amountWidth-10-(left+30+nameWidth),tagWidth=min(room,measure(tag,tagFont)+14)
+                let capsule=NSRect(x:left+30+nameWidth,y:top+1.5,width:tagWidth,height:17)
+                quiet.setFill();NSBezierPath(roundedRect:capsule,xRadius:8.5,yRadius:8.5).fill()
+                draw(tag,x:capsule.minX+7,middle:capsule.midY,width:capsule.width-14,tagFont,.secondaryLabelColor,.center)
             }
-            draw(amount,NSRect(x:ir-amountWidth-2,y:top-1,width:amountWidth+2,height:22),amountFont,.labelColor,.right)
+            draw(amount,x:right-amountWidth-2,middle:top+10,width:amountWidth+2,amountFont,.labelColor,.right)
             let part=p.summaryPart?.tokens ?? 0
-            draw(tokenLine(p)+(part>0 ? " · 占 "+share(part/sum) : ""),NSRect(x:il,y:top+24,width:iw,height:16),font(11.5,.medium),.secondaryLabelColor)
-            draw(DashboardView.stats(p),NSRect(x:il,y:top+42,width:iw,height:15),font(10.5,.regular),.secondaryLabelColor)
-            var my=top+66
-            if p.models.isEmpty{draw("此时段暂无模型调用",NSRect(x:il,y:my,width:iw,height:15),font(11,.regular),.secondaryLabelColor)}
+            draw(tokenLine(p)+(part>0 ? " · 占 "+share(part/sum) : ""),NSRect(x:left+22,y:top+26,width:width-22,height:16),font(11.5,.medium),.secondaryLabelColor)
+            draw(DashboardView.stats(p),NSRect(x:left+22,y:top+44,width:width-22,height:15),font(10.5,.regular),.secondaryLabelColor)
+            var my=top+70
+            if p.models.isEmpty{draw("此时段暂无模型调用",NSRect(x:left+22,y:my,width:width-22,height:15),font(11,.regular),.secondaryLabelColor)}
+            // Columns sized to this tool's longest model name and amount; the bar takes what is left.
+            let modelFont=font(11.5,.regular),figureFont=font(11.5,.medium,rounded:true)
+            let nameColumn=min(150,(p.models.map{measure(modelName($0.name),modelFont)}.max() ?? 0)+14)
+            let amountColumn=max(52,(p.models.map{measure(modelAmount($0),figureFont)}.max() ?? 0)+4)
             for m in p.models{
-                draw(modelName(m.name),NSRect(x:il,y:my,width:iw-140,height:16),font(11.5,.regular),.labelColor)
-                draw(modelAmount(m),NSRect(x:ir-134,y:my,width:86,height:16),font(11.5,.medium,rounded:true),.labelColor,.right)
-                draw(share(m.share),NSRect(x:ir-44,y:my,width:44,height:16),font(11,.medium,rounded:true),.secondaryLabelColor,.right)
-                let track=NSRect(x:il,y:my+17,width:iw,height:3)
-                NSColor.labelColor.withAlphaComponent(isDark ? 0.08 : 0.06).setFill();NSBezierPath(roundedRect:track,xRadius:1.5,yRadius:1.5).fill()
-                let fill=NSRect(x:track.minX,y:track.minY,width:max(3,track.width*CGFloat(min(1,m.share))),height:track.height)
-                NSGradient(starting:c.withAlphaComponent(0.55),ending:c)?.draw(in:NSBezierPath(roundedRect:fill,xRadius:1.5,yRadius:1.5),angle:0)
+                draw(modelName(m.name),x:left+22,middle:my+8,width:nameColumn-8,modelFont,.labelColor)
+                let track=NSRect(x:left+22+nameColumn,y:my+5.5,width:max(20,width-22-nameColumn-amountColumn-60),height:5)
+                quiet.setFill();NSBezierPath(roundedRect:track,xRadius:2.5,yRadius:2.5).fill()
+                let fill=NSRect(x:track.minX,y:track.minY,width:max(5,track.width*CGFloat(min(1,m.share))),height:track.height)
+                NSGradient(starting:c.withAlphaComponent(0.6),ending:c)?.draw(in:NSBezierPath(roundedRect:fill,xRadius:2.5,yRadius:2.5),angle:0)
+                draw(modelAmount(m),x:right-48-amountColumn,middle:my+8,width:amountColumn,figureFont,.labelColor,.right)
+                draw(share(m.share),x:right-40,middle:my+8,width:40,font(11,.medium,rounded:true),.secondaryLabelColor,.right)
                 my+=Self.modelHeight
             }
-            y+=block.height+10
+            y+=Self.rowHeight(p)
         }
         // Signature under the card: the mark, the name and where to find it.
         let footer=card.maxY+20,nameFont=font(13.5,.semibold),nameWidth=measure(project.name,nameFont),rowWidth=20+8+nameWidth
