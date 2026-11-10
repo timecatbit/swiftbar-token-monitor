@@ -82,6 +82,25 @@ class UpdateTests(unittest.TestCase):
   self.assertEqual(row['value'],'可更新 99.0.0');self.assertTrue(row['attention'])
   self.assertTrue(any(c.get('href')==newer['page'] for c in row['children']))
   with patch.dict(os.environ,{'OCX_SELF_UPDATES':'0'}):self.assertNotIn('self_update',self.m.external_loaders())
+ def test_plugin_release_remains_installable_when_github_api_is_rate_limited(self):
+  import urllib.error
+  repo=self.m.REPOSITORY
+  page=repo+'/releases/tag/v99.0.0'
+  name='token-monitor-99.0.0.zip';asset=repo+'/releases/download/v99.0.0/'+name
+  digest='a'*64
+  blocked=urllib.error.HTTPError(self.m.RELEASES_API,403,'API rate limit exceeded',{},None)
+  response=MagicMock();response.__enter__.return_value=response;response.geturl.return_value=page
+  with patch.object(self.m.urllib.request,'urlopen',side_effect=[blocked,response]) as fetch,patch.object(self.m,'download',return_value=(digest+'  '+name+'\n').encode()) as download:
+   release,error=self.m.self_update_load()
+  self.assertIsNone(error)
+  self.assertEqual(fetch.call_args.args[0].full_url,repo+'/releases/latest')
+  download.assert_called_once_with(asset+'.sha256',4096)
+  self.assertEqual(release['assets'][0],{'name':name,'url':asset,'digest':'sha256:'+digest})
+  self.assertTrue(any('更新到 99.0.0' in row for row in self.m.self_update_lines({'self_update':release})))
+  # A missing or wrong checksum does not turn a failed lookup into an update offer.
+  with patch.object(self.m.urllib.request,'urlopen',side_effect=[blocked,response]),patch.object(self.m,'download',return_value=(digest+'  wrong.zip').encode()):
+   self.assertEqual(self.m.self_update_load(),(None,(403,'检查失败',None)))
+
  def test_self_update_verifies_the_archive_and_runs_its_installer(self):
   import hashlib,io,zipfile
   root=Path(self.tmp.name);marker=root/'installed.json'

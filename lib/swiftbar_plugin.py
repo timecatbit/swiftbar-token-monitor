@@ -1325,6 +1325,25 @@ def version_tuple(text):
     return tuple(int(part) for part in match.groups()) if match else None
 
 
+def self_update_web():
+    """Discover a release via its public page when the anonymous API is rate-limited."""
+    try:
+        req=urllib.request.Request(REPOSITORY+'/releases/latest',headers={'User-Agent':'TokenMonitor/'+VERSION})
+        with urllib.request.urlopen(req,timeout=8) as response:page=response.geturl()
+        match=re.fullmatch(re.escape(REPOSITORY)+r'/releases/tag/v(\d+\.\d+\.\d+)',page)
+        if not match:return None
+        version=match[1]
+        if version_tuple(version)<=version_tuple(VERSION):return {'latest':version,'page':page,'assets':[]}
+        name='token-monitor-%s.zip'%version;url=REPOSITORY+'/releases/download/v%s/%s'%(version,name)
+        fields=download(url+'.sha256',4096).decode('ascii').split()
+        if len(fields)!=2 or fields[1].removeprefix('*')!=name or not re.fullmatch(r'[0-9a-f]{64}',fields[0]):
+            return None
+        return {'latest':version,'page':page,'assets':[{'name':name,'url':url,'digest':'sha256:'+fields[0]},
+                                                      {'name':name+'.sha256','url':url+'.sha256'}]}
+    except (OSError,ValueError,SelfUpdateError):
+        return None
+
+
 def self_update_load():
     """This plugin's latest GitHub release: a plain GET with no identifiers. No release, a draft
     or a pre-release means there is nothing to offer."""
@@ -1332,7 +1351,11 @@ def self_update_load():
     try:
         with urllib.request.urlopen(req,timeout=8) as response:body=response.read(1024*1024+1)
     except urllib.error.HTTPError as error:
-        return ({'latest':None},None) if error.code==404 else (None,(error.code,'检查失败',None))
+        code=error.code;error.close()
+        if code in (403,429):
+            release=self_update_web()
+            if release:return release,None
+        return ({'latest':None},None) if code==404 else (None,(code,'检查失败',None))
     except (OSError,ValueError):return None,(0,'检查失败',None)
     try:release=json.loads(body.decode('utf-8')) if len(body)<=1024*1024 else None
     except ValueError:release=None
