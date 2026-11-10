@@ -1,3 +1,4 @@
+import base64
 import json
 from pathlib import Path
 import shutil
@@ -167,6 +168,21 @@ class SourceTests(unittest.TestCase):
         self.assertEqual(self.read()['summary']['totalTokens'],150)
         active.unlink();self.assertEqual(self.read()['summary']['totalTokens'],150)
         compressed.unlink();self.assertEqual(self.read()['summary']['totalTokens'],300)
+    @unittest.skipUnless(sources.zstd_codec(),'Python zstd codec not installed')
+    def test_fresh_index_reads_archived_codex_without_external_tools(self):
+        archive=self.root/'archived_sessions'
+        archive.mkdir()
+        # A recorded September session predates the first query by months.
+        (archive/'rollout.jsonl.zst').write_bytes(base64.b64decode(
+            'KLUv/WA/APUFAAILIx1gaeoG/7MJtpHdtVmUjFihQfA4jZjhRN+buEQL8ob33svzrgXSsQmGGlgOmacgdNdYYYKou/SuqxFYPbtV6INMlIlOGpw0BWkIEIloTN+XqUecpeddWMUebZgAgAHzDVl7NHvFPreROOHe8B6upe+szCYaKkwKwkN7LbRhOaD+ssSt3NexINy2eEwCEgA4b3wG98++crLAnyVARwPNEaM2FGYnYQUAMsiwxtkjOIaQPwZWA5R4teuyyhM='))
+        (archive/'broken.jsonl.zst').write_bytes(b'invalid frame')
+        with patch.object(sources.shutil,'which',return_value=None):
+            self.assertEqual(self.read(start=1794182400)['summary']['requests'],0)
+            historical=self.read()
+        self.assertTrue(historical['partial'])
+        self.assertEqual(historical['summary']['requests'],1)
+        self.assertEqual(historical['summary']['totalTokens'],110)
+
     def test_same_size_rewrite_and_removal_rebuild_usage(self):
         path=self.root/'one.jsonl';self.write(path,[self.codex(150,150,100)]);self.read()
         self.write(path,[self.codex(151,151,100)]);self.assertEqual(self.read()['summary']['totalTokens'],151)

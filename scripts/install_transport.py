@@ -1,4 +1,4 @@
-"""Prepare pinned, interpreter-specific Claude HTTP wheels before publishing an install."""
+"""Prepare pinned runtime wheels before publishing an install."""
 import hashlib
 import os
 from pathlib import Path
@@ -16,7 +16,16 @@ def prepare(root,python):
     fingerprint=hashlib.sha256(requirements.read_bytes()).hexdigest()
     marker=target/'.requirements-sha256'
     def usable(path):
-        probe='import sys; sys.path.insert(0,sys.argv[1]); from curl_cffi import requests; requests.Session(impersonate="chrome").close()'
+        probe="""import sys
+sys.path.insert(0,sys.argv[1])
+from curl_cffi import requests
+requests.Session(impersonate='chrome').close()
+if sys.version_info >= (3,14):
+    from compression import zstd
+else:
+    from backports import zstd
+assert zstd.decompress(zstd.compress(b'usage')) == b'usage'
+"""
         # -B: the probe must not leave bytecode that records this build folder's path.
         return subprocess.run([python,'-B','-c',probe,str(path)],capture_output=True,timeout=15).returncode==0
     if marker.is_file() and marker.read_text().strip()==fingerprint and usable(target):return target
@@ -30,7 +39,7 @@ def prepare(root,python):
         environment={k:v for k,v in os.environ.items() if k in ('HOME','PATH','TMPDIR','LANG','LC_ALL')}
         result=subprocess.run(command,capture_output=True,text=True,timeout=180,env=environment)
         if result.returncode or not usable(staging):
-            raise RuntimeError('Claude HTTP component installation failed; check Python pip and access to pypi.org. No installed files were changed.')
+            raise RuntimeError('Plugin runtime component installation failed; check Python pip and access to pypi.org. No installed files were changed.')
         for cache in list(staging.rglob('__pycache__')):shutil.rmtree(cache)
         (staging/'.requirements-sha256').write_text(fingerprint+'\n')
         if target.exists():shutil.rmtree(target)

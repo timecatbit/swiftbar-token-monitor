@@ -7,14 +7,13 @@ import ctypes
 import hashlib
 import json
 import math
-import platform
 from pathlib import Path
 import re
 import sqlite3
 import subprocess
-import sys
-import sysconfig
 import time
+
+from swiftbar_runtime import activate_vendor
 
 ORIGIN='https://claude.ai'
 UUID=re.compile(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}',re.I)
@@ -26,17 +25,9 @@ class UsageError(Exception):
     pass
 
 
-def transport_tag():
-    return sys.implementation.cache_tag+'-'+sysconfig.get_platform()+'-'+platform.machine()
-
-
 def transport_client():
-    # Installer packages wheels for the interpreter used by the plugin, separately
-    # from source files. No pip/network work occurs during a menu refresh.
-    root=Path(__file__).resolve().parent.parent
-    vendor=root/'python'/transport_tag()
-    if not vendor.is_dir():vendor=root/'build/python'/transport_tag()
-    if vendor.is_dir() and str(vendor) not in sys.path:sys.path.insert(0,str(vendor))
+    # No pip/network work occurs during a menu refresh.
+    activate_vendor()
     try:
         from curl_cffi import requests
         return requests.Session(impersonate='chrome',allow_redirects=False,verify=True)

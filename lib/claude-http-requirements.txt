@@ -31,3 +31,17 @@ pycparser==2.23 \
     --hash=sha256:e5c6e8d3fbad53479cab09ac03729e0a9faf2bee3db8208a550daf5af81a5934
 certifi==2026.10.23 \
     --hash=sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1
+
+# Read compressed ChatGPT and DeepSeek Harness sessions without Homebrew or Node.
+backports.zstd==1.3.0 ; python_version == "3.9" \
+    --hash=sha256:cab7dc828e19d8871935f3061e0550713aacb230fc3a3919bed0440a1295c255 \
+    --hash=sha256:ef2a0bfb7aa590134ef43479cda439de054d5503b1be4756aca0afa9181cc3a5
+backports.zstd==1.8.0 ; "3.10" <= python_version and python_version < "3.14" \
+    --hash=sha256:5173afe530ca59bba8938a19edcb875c70f78bf9fee01cb3614a97876d112962 \
+    --hash=sha256:e213317db53e787ef7bf13c5a2070bd98a888ca7603bbd1904ede443c197f3cc \
+    --hash=sha256:4c4af1b9542bc6420d55ff47d7efe13c19f56a80cbdd1ffd0a29767801dab886 \
+    --hash=sha256:8efdb220f34418cef987da10d857cf95cdcffe431cc0e536efc25d7279abf118 \
+    --hash=sha256:6e024aee6bfd04094fce60133b0e6bd0f8027cdb2823157880bc87f1ffdfee21 \
+    --hash=sha256:d810d83c8a703f424ed2a49aa271078c91b530da2d8c104bd88207e68d116de8 \
+    --hash=sha256:49c4006cdf41c15ffcc74f10d9a6485be841106cd4d5aa7ea7bf1075cc37fb83 \
+    --hash=sha256:4fa862d24b7fb392279a95bc9acc1f0ede8a25de9efbed03fb305ceac2f6abb0

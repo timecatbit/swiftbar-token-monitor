@@ -2,6 +2,7 @@
 
 Codex delta/rollout rules adapted from ccusage (MIT), 615bd802. See CCUSAGE_LICENSE.
 """
+from functools import lru_cache
 import hashlib
 import json
 import math
@@ -17,6 +18,7 @@ import time
 from datetime import datetime, timezone
 
 from swiftbar_time import parse_iso
+from swiftbar_runtime import activate_vendor
 
 
 def number(value):
@@ -234,9 +236,24 @@ def _jsonl_files(root, source):
     return [value[1] for value in chosen.values()]
 
 
+@lru_cache(maxsize=1)
+def zstd_codec():
+    try:
+        from compression import zstd
+    except ImportError:
+        activate_vendor()
+        try:
+            from backports import zstd
+        except ImportError:
+            return None
+    return zstd
+
+
 def _stream(path):
     if path.suffix not in ('.zstd','.zst'):
         return path.open('rb'), None, None
+    if codec:=zstd_codec():
+        return codec.ZstdFile(path, 'rb'), None, None
     binary = shutil.which('zstd')
     if binary:
         command = [binary, '-dc', '--', str(path)]
@@ -265,6 +282,9 @@ def jsonl_usage(source, root, cache, start, end, zone, exclude_proxy=False, prox
         parser = {'codex':codex_event,'deepseek-harness':deepseek_event,'workbuddy':workbuddy_event,'qoder':qoder_event}[source]
         errors = 0
         paths = _jsonl_files(root, source)
+        read_errors = (OSError, EOFError, ValueError, RuntimeError, subprocess.SubprocessError)
+        if any(path.suffix in ('.zst','.zstd') for path in paths) and (codec:=zstd_codec()):
+            read_errors += (codec.ZstdError,)
         forget_missing(conn, {identity(str(path)) for path in paths})
         for path in paths:
             try:
@@ -311,7 +331,7 @@ def jsonl_usage(source, root, cache, start, end, zone, exclude_proxy=False, prox
                     stream.close()
                     if timer: timer.cancel()
                     if process and process.poll() is None: process.kill(); process.wait()
-            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+            except read_errors:
                 errors += 1
         conn.commit()
         try:carried = proxy_requests(proxy_log, cache, start, end) if proxy_log else None
