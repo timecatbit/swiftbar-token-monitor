@@ -94,6 +94,36 @@ class OAuthTests(unittest.TestCase):
    done=Mock(returncode=0,stdout=printed)
    with patch.dict(os.environ,{'CLAUDE_CONFIG_DIR':''}),patch.object(oauth.subprocess,'run',return_value=done):
     self.assertEqual(oauth.credentials()['expires'],self.now+60)
+ def login(self,**fields):
+  return {'claudeAiOauth':dict({'accessToken':'private-token-fixture','expiresAt':(self.now+60)*1000,'scopes':['user:profile']},**fields)}
+ def test_keychain_item_of_this_user_is_read_first(self):
+  # Claude Code files its login under the login name; another same-named item may be stale.
+  found=Mock(returncode=0,stdout=json.dumps(self.login()).encode())
+  with patch.dict(os.environ,{'CLAUDE_CONFIG_DIR':'','USER':'mini.coke'}),patch.object(oauth.subprocess,'run',return_value=found) as run:
+   oauth.credentials()
+  self.assertEqual(run.call_args.args[0][2:4],['-a','mini.coke'])
+  # Saved under another account by an older version: the service alone still finds it.
+  with patch.dict(os.environ,{'CLAUDE_CONFIG_DIR':'','USER':'mini coke'}),patch.object(oauth.subprocess,'run',side_effect=[Mock(returncode=44,stdout=b''),found]) as run:
+   oauth.credentials()
+  self.assertEqual(run.call_args_list[0].args[0][2:4],['-a','claude-code-user'])
+  self.assertNotIn('-a',run.call_args_list[1].args[0])
+ def test_unreadable_keychain_login_falls_back_to_the_file_like_claude_code(self):
+  home=self.root/'home';(home/'.claude').mkdir(parents=True)
+  with patch.dict(os.environ,{'CLAUDE_CONFIG_DIR':'','HOME':str(home)}),patch.object(oauth,'keychain_data',return_value=b'not a login'):
+   with self.assertRaises(oauth.OAuthError) as caught:oauth.credentials()
+   self.assertEqual((caught.exception.code,str(caught.exception)),('credential','Claude Code 钥匙串里的登录无法解析'))
+   (home/'.claude/.credentials.json').write_text(json.dumps(self.login()))
+   self.assertEqual(oauth.credentials()['expires'],self.now+60)
+ def test_each_unusable_login_names_its_problem(self):
+  cases=[(self.login(accessToken='',expiresAt=0),'missing','Claude Code 登录已失效，请在 Claude Code 运行 /login'),
+         (self.login(accessToken='bad token+/='),'credential','Claude Code 登录令牌格式无法识别'),
+         (self.login(expiresAt='2026-11-10'),'credential','Claude Code 登录缺少有效期'),
+         (self.login(scopes='user:inference'),'scope','Claude Code 登录缺少用量权限，请重新登录'),
+         ({'claudeAiOauth':'x'},'credential','Claude Code 登录内容无法识别')]
+  for stored,code,message in cases:
+   with patch.dict(os.environ,{'CLAUDE_CONFIG_DIR':''}),patch.object(oauth,'keychain_data',return_value=json.dumps(stored).encode()),self.assertRaises(oauth.OAuthError) as caught:
+    oauth.credentials()
+   self.assertEqual((caught.exception.code,str(caught.exception)),(code,message))
  def test_login_without_a_subscription_says_so(self):
   with patch.dict(os.environ,{'CLAUDE_CONFIG_DIR':''}),patch.object(oauth,'keychain_data',return_value=json.dumps({'mcpOAuth':{}}).encode()),self.assertRaises(oauth.OAuthError) as caught:
    oauth.credentials()

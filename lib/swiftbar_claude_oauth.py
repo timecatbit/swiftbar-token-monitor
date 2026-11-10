@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import select
 import pty
+import pwd
 import shutil
 import signal
 import subprocess
@@ -35,12 +36,23 @@ class OAuthError(Exception):
         super().__init__(message)
 
 
+def keychain_account():
+    # Claude Code files its login under the login name, or claude-code-user when the name has other characters.
+    try:name=os.environ.get('USER') or pwd.getpwuid(os.getuid()).pw_name
+    except (KeyError,OSError):name=''
+    return name if re.fullmatch(r'[A-Za-z0-9._-]+',name) else 'claude-code-user'
+
+
 def keychain_data():
-    """Use the signed system reader; never put credentials in command arguments."""
-    try:
-        run=subprocess.run(['/usr/bin/security','find-generic-password','-s','Claude Code-credentials','-w'],
-            capture_output=True,timeout=8,check=False)
-    except (OSError,subprocess.SubprocessError):raise OAuthError('keychain','钥匙串读取未完成，请手动重试授权') from None
+    """Use the signed system reader; never put credentials in command arguments.
+    The item Claude Code reads (service and account) comes first: with only the service,
+    security returns whichever same-named item it finds first, possibly a stale one."""
+    for account in (keychain_account(),None):
+        try:
+            run=subprocess.run(['/usr/bin/security','find-generic-password']+(['-a',account] if account else [])+['-s','Claude Code-credentials','-w'],
+                capture_output=True,timeout=8,check=False)
+        except (OSError,subprocess.SubprocessError):raise OAuthError('keychain','钥匙串读取未完成，请手动重试授权') from None
+        if run.returncode!=44:break
     if run.returncode==44:raise OAuthError('missing','请先在 Claude Code 登录订阅账户')
     if run.returncode:raise OAuthError('keychain','钥匙串未授权，请点击授权读取登录')
     # security prints the stored value as bare hex digits when any byte is not printable
@@ -55,30 +67,44 @@ def config_root():
     return Path(raw.split(',')[0]).expanduser().resolve() if raw else Path.home()/'.claude'
 
 
+def login_document(raw):
+    """Claude Code's stored login, or None when the content is not one."""
+    if len(raw)>MAX_RESPONSE:return None
+    try:data=json.loads(raw)
+    except ValueError:return None
+    return data if isinstance(data,dict) else None
+
+
 def credentials():
     if ',' in os.environ.get('CLAUDE_CONFIG_DIR',''):raise OAuthError('profile','多个 Claude 目录，请指定单一登录来源')
     root=config_root();default=Path.home()/'.claude'
-    raw=None
+    data=None;unreadable=None
     if root==default:
-        try:raw=keychain_data()
+        try:
+            data=login_document(keychain_data())
+            if data is None:unreadable='Claude Code 钥匙串里的登录无法解析'
         except OAuthError as error:
             if error.code!='missing':raise
-    if raw is None:
+    # Like Claude Code, use .credentials.json when the keychain holds no readable login.
+    if data is None:
         try:
-            with (root/'.credentials.json').open('rb') as stream:raw=stream.read(MAX_RESPONSE+1)
-        except OSError:raise OAuthError('missing','请先在 Claude Code 登录订阅账户') from None
-    try:
-        if len(raw)>MAX_RESPONSE:raise ValueError()
-        oauth=json.loads(raw).get('claudeAiOauth')
-        # Signed in with an API key, or only MCP logins stored: no subscription login to read.
-        if oauth is None:raise OAuthError('missing','请先在 Claude Code 登录订阅账户')
-        token=oauth.get('accessToken');expiry=oauth.get('expiresAt')
-        if not isinstance(token,str) or not re.fullmatch(r'[A-Za-z0-9._~-]{16,4096}',token):raise ValueError()
-        if type(expiry) not in (int,float) or not math.isfinite(expiry):raise ValueError()
-        if 'user:profile' not in (oauth.get('scopes') or []):raise OAuthError('scope','Claude Code 登录缺少用量权限，请重新登录')
-        # Do not retain the refresh token. Claude Code owns token rotation.
-        return {'token':token,'expires':expiry/1000,'owner':hashlib.sha256(token.encode()).hexdigest()}
-    except (ValueError,TypeError,AttributeError):raise OAuthError('credential','Claude Code 登录格式尚未支持') from None
+            with (root/'.credentials.json').open('rb') as stream:data=login_document(stream.read(MAX_RESPONSE+1))
+            if data is None:unreadable='Claude Code 登录文件无法解析'
+        except OSError:pass
+    if data is None:raise OAuthError('credential',unreadable) if unreadable else OAuthError('missing','请先在 Claude Code 登录订阅账户')
+    oauth=data.get('claudeAiOauth')
+    # Signed in with an API key, or only MCP logins stored: no subscription login to read.
+    if oauth is None:raise OAuthError('missing','请先在 Claude Code 登录订阅账户')
+    if not isinstance(oauth,dict):raise OAuthError('credential','Claude Code 登录内容无法识别')
+    token=oauth.get('accessToken');expiry=oauth.get('expiresAt')
+    # Claude Code empties the stored token once the server rejects its refresh token.
+    if token=='':raise OAuthError('missing','Claude Code 登录已失效，请在 Claude Code 运行 /login')
+    if not isinstance(token,str) or not re.fullmatch(r'[A-Za-z0-9._~-]{16,4096}',token):raise OAuthError('credential','Claude Code 登录令牌格式无法识别')
+    if type(expiry) not in (int,float) or not math.isfinite(expiry):raise OAuthError('credential','Claude Code 登录缺少有效期')
+    scopes=oauth.get('scopes')
+    if not isinstance(scopes,list) or 'user:profile' not in scopes:raise OAuthError('scope','Claude Code 登录缺少用量权限，请重新登录')
+    # Do not retain the refresh token. Claude Code owns token rotation.
+    return {'token':token,'expires':expiry/1000,'owner':hashlib.sha256(token.encode()).hexdigest()}
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
