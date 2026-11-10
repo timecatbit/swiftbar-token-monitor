@@ -1594,7 +1594,7 @@ def claude_subscription_lines(data):
     if failed:rows.append(item('更新时间',badge='刷新失败',paneldetail=str(error[1])+('\n保留最近一次成功的数据 · '+age if windows else ''),level=1,color=WARN,size=10))
     elif windows:rows.append(item('更新时间',badge=age,paneldetail='数据待更新' if stale else None,level=1,color=MUTED,size=10))
     if view_settings()['claudeOAuthUsage']:
-        rows.append(item('立即刷新用量',badge='正在刷新…' if claude_retry_pending() else None,level=1,sfimage='arrow.clockwise',**act('retry-claude-usage')))
+        rows.append(item('立即刷新用量',level=1,sfimage='arrow.clockwise',**act('retry-claude-usage')))
         if failed:rows.append(item('重新授权读取登录…',level=1,sfimage='lock',**act('reauthorize-claude-oauth')))
     else:
         rows.append(item('启用 Claude Code 登录查询…',level=1,sfimage='arrow.triangle.2.circlepath',paneldetail='主动获取订阅用量，不读取 Cookie',**act('set-claude-oauth','true')))

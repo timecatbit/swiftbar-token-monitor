@@ -113,7 +113,8 @@ class DesktopTests(unittest.TestCase):
    self.m.claude_subscription_cached()
   launch.assert_called_once_with('--background-refresh-wait')
   self.assertTrue(self.m.loader_due('claude_subscription'))
-  self.assertIn('正在刷新','\n'.join(self.m.claude_subscription_lines({'claude_subscription':answer[0]})))
+  # Refreshes stay silent: the pending retry adds no progress text to the row.
+  self.assertNotIn('正在刷新','\n'.join(self.m.claude_subscription_lines({'claude_subscription':answer[0]})))
   with patch.object(self.m.claude_oauth,'fetch',return_value=answer) as fetch:
    self.m.claude_subscription_cached()
    self.assertTrue(fetch.call_args.kwargs['force'])
