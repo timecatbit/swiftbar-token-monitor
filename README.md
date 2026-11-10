@@ -31,9 +31,9 @@ brew install --cask swiftbar
 
 ```sh
 cd ~/Downloads
-curl -fLO https://github.com/timecatbit/swiftbar-token-monitor/releases/download/v5.15.0/token-monitor-5.15.0.zip
-ditto -x -k token-monitor-5.15.0.zip .
-python3 token-monitor-5.15.0/install.py
+curl -fLO https://github.com/timecatbit/swiftbar-token-monitor/releases/download/v5.15.1/token-monitor-5.15.1.zip
+ditto -x -k token-monitor-5.15.1.zip .
+python3 token-monitor-5.15.1/install.py
 ```
 
 安装器会自动找到 SwiftBar 的插件目录，备份旧文件、保留你的设置，首次安装还会自动勾选检测到的工具。装好后菜单栏会出现星星图标，发布包可以删除。
