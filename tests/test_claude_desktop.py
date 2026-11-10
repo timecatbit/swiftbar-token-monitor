@@ -138,6 +138,8 @@ class DesktopTests(unittest.TestCase):
    with patch.object(self.m,'confirm',return_value=accepted) as confirm,patch.object(self.m,'launch_background') as launch:
     self.m.consume_panel_action()
    confirm.assert_called_once()
+   # Consent names everything the plugin may do with the login, every time it asks.
+   self.assertIn('自检续期',confirm.call_args.args[1]);self.assertIn('凭据只在内存',confirm.call_args.args[1])
    self.assertEqual(launch.call_count,int(accepted))
    self.assertEqual(bool(self.m.claude_retry_pending()),accepted)
    self.assertEqual(self.m.read_cache('panel-action-receipt')['status'],'done')
