@@ -50,6 +50,14 @@ class ClaudeTests(unittest.TestCase):
   self.assertAlmostEqual(self.m.claude_price('claude-opus-5-5',(1000000,1000000,1000000,1000000,1000000)),37.2)
   self.assertAlmostEqual(self.m.claude_price('claude-opus-5-5',(1000000,0,0,0,0),'fast','us'),8.8)
   self.assertAlmostEqual(self.m.claude_price('claude-haiku-5-5',(100001,0,0,0,0)),.0500005)
+ def test_fable_prices_by_release(self):
+  each=(1000000,)*5
+  self.assertAlmostEqual(self.m.claude_price('claude-fable-5-2',each),74.2)
+  self.assertAlmostEqual(self.m.claude_price('claude-fable-5-2',(1000000,0,0,0,0),'fast'),16)
+  self.assertAlmostEqual(self.m.claude_price('claude-fable-5-1',each),92.75)
+  # Fable 5 reads its cache at a tenth of input, not the 5.1/5.2 rate, and has no fast mode.
+  self.assertAlmostEqual(self.m.claude_price('claude-fable-5',each),93.5)
+  self.assertIsNone(self.m.claude_price('claude-fable-5',each,'fast'))
  def test_non_assistant_and_synthetic_are_ignored(self):
   row=self.row();row['type']='user';self.write('a.jsonl',[row,self.row('s',model='<synthetic>')]);self.assertEqual(self.stats()['summary']['requests'],0)
  def test_third_party_model_is_tracked_without_invented_price(self):

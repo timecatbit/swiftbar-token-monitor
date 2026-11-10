@@ -881,9 +881,11 @@ def update_status_cached(current_version=""):
 
 
 # Local usage only: no prompt, response, credential, or project contents are retained.
-# Price source verified 2026-11-04: https://platform.claude.com/docs/en/about-claude/pricing
+# Price source verified 2026-11-10: https://platform.claude.com/docs/en/about-claude/pricing
 CLAUDE_PRICES = {
+    'claude-fable-5-2': (8,40,10,16,.20),
     'claude-fable-5-1': (10,50,12.5,20,.25),
+    'claude-fable-5': (10,50,12.5,20,1),
     'claude-haiku-5-5': (.1,.5,.125,.2,.01),
     'claude-opus-5-5': (4,20,5,8,.20),
     'claude-sonnet-5-5': (2,10,2.5,4,.10),
@@ -907,7 +909,7 @@ def claude_price(model, metrics, speed='standard', geo='global', tier='standard'
     if match == 'claude-haiku-5-5' and sum(metrics[i] for i in (0,2,3,4)) > 100000: factor *= 5
     if tier == 'batch': factor *= .5
     if speed == 'fast':
-        if match not in ('claude-opus-5-5','claude-opus-5','claude-opus-4-8'): return None
+        if match not in ('claude-fable-5-2','claude-opus-5-5','claude-opus-5','claude-opus-4-8'): return None
         factor *= 2
     return sum(value*price for value,price in zip(metrics,CLAUDE_PRICES[match]))*factor/1e6
 
@@ -951,7 +953,7 @@ def claude_usage_records(root, db_path=None, now=None, range_key="today", files=
                 'days':[dict(v,date=k) for k,v in sorted(days.items())],
                 'hours':[dict(v,timestamp=k) for k,v in sorted(hours.items())],
                 'firstActivityAt':first_activity}
-    result=dict(tally(events),source='Claude App · 已登记会话',pricingDate='2026-11-04',day=now.date().isoformat())
+    result=dict(tally(events),source='Claude App · 已登记会话',pricingDate='2026-11-10',day=now.date().isoformat())
     if carriers:
         # Requests a gateway such as Magpie also logged count once in Summary, from the gateway.
         view=lambda row:{'input':row['metrics'][0],'output':row['metrics'][1],'writes':row['metrics'][2]+row['metrics'][3],'cached':row['metrics'][4],'timestamp':row['ts']}
