@@ -216,10 +216,14 @@ expect(DashboardView.legendLabels(legendData)==["总量","DeepSeek","ChatGPT","C
 expect(!MenuLayout.aiming(from:NSPoint(x:330,y:480),to:NSPoint(x:332,y:479),flyout:openFlyout),"A tiny drift toward the flyout is not aiming")
 // The share picture is opaque, signed, and lists every source that has data.
 var shareSource=grouped;shareSource.providers[0].available=false
-let shareCard=ShareCard(shareSource,project:Project(name:"Token Monitor",url:"https://github.com/timecatbit/swiftbar-token-monitor"))
-expect(shareCard.dashboard.providers.allSatisfy{$0.available} && shareCard.dashboard.providers.count==shareSource.providers.filter{$0.available}.count,"Share card keeps every source with data, as the panel does")
-let picture=shareCard.png().flatMap{NSBitmapImageRep(data:$0)}
-expect(picture?.pixelsWide==Int(shareCard.bounds.width*2) && picture?.hasAlpha==true && picture.map{$0.colorAt(x:2,y:2)?.alphaComponent==1} == true,"Share picture is a 2x opaque PNG")
+for style in ShareCard.Style.allCases {
+    let card=ShareCard.make(style,shareSource,project:Project(name:"Token Monitor",url:"https://github.com/timecatbit/swiftbar-token-monitor"))
+    expect(card.dashboard.providers.allSatisfy{$0.available} && card.dashboard.providers.count==shareSource.providers.filter{$0.available}.count,"Share \(style) keeps every source with data, as the panel does")
+    let picture=card.png().flatMap{NSBitmapImageRep(data:$0)}
+    expect(card.bounds.height>200 && picture?.pixelsWide==Int(card.bounds.width*2) && picture?.hasAlpha==true && picture.map{$0.colorAt(x:2,y:2)?.alphaComponent==1} == true,"Share \(style) picture is a 2x opaque PNG")
+}
+expect(ShareCard.Style.allCases.map{$0.title}==["卡片风格","终端风格"],"People pick the card or the terminal style when they share")
+let shareCard=ShareCard.make(.card,shareSource,project:Project(name:"Token Monitor",url:"https://github.com/timecatbit/swiftbar-token-monitor"))
 let clip=shareCard.png().map{ShareCard.pasteboardItem($0)}
 expect(clip.map{Set($0.types)==Set([NSPasteboard.PasteboardType.png,.tiff])}==true,"Copied picture carries PNG and TIFF, not a file URL")
 expect(PanelInteraction.keepsPanelOpen(["retry-claude-usage"]),"Retrying Claude usage keeps the panel open")
