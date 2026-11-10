@@ -44,7 +44,7 @@ if problems:
     sys.exit('Unused code:\n' + '\n'.join(problems))
 with tempfile.TemporaryDirectory(prefix='swiftbar-token-tests-') as scratch:
     private_prefixes = ('OCX_', 'KOMARI_', 'DEEPSEEK_', 'XAI_', 'MINIMAX_', 'CLAUDE_',
-                        'OPENAI_', 'ANTHROPIC_', 'MOONSHOT_', 'GOOGLE_', 'KIMI_', 'CODEX_', 'GEMINI_', 'WORKBUDDY_', 'QODER_', 'QODERCN_', 'OPENCODE_', 'DSH_')
+                        'OPENAI_', 'ANTHROPIC_', 'MOONSHOT_', 'GOOGLE_', 'KIMI_', 'CODEX_', 'GEMINI_', 'WORKBUDDY_', 'QODER_', 'QODERCN_', 'OPENCODE_', 'DSH_', 'MAGPIE_')
     environment = {k:v for k,v in os.environ.items() if not k.startswith(private_prefixes)}
     isolated_home = Path(scratch) / 'home'
     isolated_home.mkdir()

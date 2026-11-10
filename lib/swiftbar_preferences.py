@@ -10,6 +10,7 @@ import swiftbar_files as files
 MODULES = (
     ('summary', 'Summary', '概览'),
     ('opencodex', 'OpenCodex', 'Harness'),
+    ('magpie', 'Magpie', 'Harness'),
     ('claude', 'Claude', 'Harness'),
     ('codex', 'ChatGPT', 'Harness'),
     ('opencode', 'OpenCode', 'Harness'),
@@ -24,7 +25,7 @@ MODULES = (
 ALERT_LEVELS = (0, 70, 80, 90)  # Usage alert: 0 is off.
 DEFAULT_VISIBLE = ['summary', 'opencodex', 'claude', 'deepseek', 'chatgpt', 'komari', 'updates']
 KNOWN = {row[0] for row in MODULES}
-USAGE = ('opencodex', 'claude', 'codex', 'opencode', 'deepseek-harness', 'workbuddy', 'qoder', 'gemini')
+USAGE = ('opencodex', 'magpie', 'claude', 'codex', 'opencode', 'deepseek-harness', 'workbuddy', 'qoder', 'gemini')
 
 
 def balance_line(value):

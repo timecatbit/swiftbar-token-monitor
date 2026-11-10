@@ -11,6 +11,7 @@
 # export CLAUDE_CONFIG_DIR="$HOME/.claude,$HOME/.config/claude"
 # export OCX_CHATGPT_HOME="$HOME/.codex"  # Subscription login source; does not change ChatGPT local usage.
 # export CODEX_USAGE_DIR="$HOME/.codex"
+# export MAGPIE_USAGE_DIR="$HOME/.config/magpie"  # Directory containing Magpie usage.jsonl.
 # export OPENCODE_DATA_DIR="$HOME/.local/share/opencode"
 # export DSH_SESSIONS_DIR="/path/to/your/harness/session-logs"
 # export OCX_TIMEZONE="Asia/Taipei"  # Default: system timezone.

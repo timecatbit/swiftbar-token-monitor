@@ -206,7 +206,38 @@ def deepseek_event(row, state):
     return None
 
 
+def magpie_root(home):
+    configured = os.environ.get('MAGPIE_USAGE_DIR')
+    if configured:
+        return Path(configured).expanduser()
+    xdg = Path(os.environ.get('XDG_CONFIG_HOME') or '')
+    return (xdg if xdg.is_absolute() else Path(home)/'.config')/'magpie'
+
+
+def magpie_event(row, state):
+    """Read counters from Magpie's own gateway, not imported or internal tool calls."""
+    if row.get('source') or row.get('rejected') or row.get('handed_on'):
+        return None
+    if not row.get('provider') or not row.get('model'):
+        return None
+    # Magpie already splits fresh input, cache reads and writes, and reports
+    # reasoning within output. Price the actual model, not a routing group.
+    model = row.get('served') or row['model']
+    event = metrics(model, row.get('in'), row.get('out'), row.get('cache_read'), row.get('cache_write'), row.get('cost'))
+    timestamp = stamp(row['t'])
+    # Offsets uniquely identify distinct requests even when a gateway reuses route IDs.
+    event.update(id=identity('magpie', state['offset']), timestamp=timestamp,
+                 session=identity(row['session']) if row.get('session') else None,
+                 write1h=min(event['writes'],number(row.get('cache_write_1h'))),
+                 cacheKnown=not row.get('cache_unknown'),
+                 tier=SERVICE_TIERS.get(row.get('tier_served')), fast=row.get('tier_served')=='fast')
+    return event
+
+
 def _jsonl_files(root, source):
+    if source == 'magpie':
+        log = root/'usage.jsonl'
+        return [log] if log.is_file() else []
     if source == 'codex':
         roots = [root/name for name in ('sessions', 'archived_sessions') if (root/name).is_dir()]
         chosen={}
@@ -266,7 +297,7 @@ def _stream(path):
     return process.stdout, process, timer
 
 
-def jsonl_usage(source, root, cache, start, end, zone, exclude_proxy=False, proxy_log=None):
+def jsonl_usage(source, root, cache, start, end, zone, exclude_proxy=False, proxy_log=None, price=None):
     """proxy_log: OpenCodex's own request log. Local records of requests it carried are dropped one by one;
     without it, the plugin can only tell proxy sessions by their provider name."""
     root = Path(root).expanduser()
@@ -279,7 +310,7 @@ def jsonl_usage(source, root, cache, start, end, zone, exclude_proxy=False, prox
         # Every copy of an event is kept per file and deduplicated when read, so a
         # vanished file (archive or compression move) only drops its own rows.
         conn.executescript('CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY, inode INTEGER, size INTEGER, mtime INTEGER, offset INTEGER, state TEXT); CREATE TABLE IF NOT EXISTS events(id TEXT, file TEXT, ts REAL, data TEXT, PRIMARY KEY(id, file)); CREATE INDEX IF NOT EXISTS events_ts ON events(ts); CREATE INDEX IF NOT EXISTS events_file ON events(file);')
-        parser = {'codex':codex_event,'deepseek-harness':deepseek_event,'workbuddy':workbuddy_event,'qoder':qoder_event}[source]
+        parser = {'codex':codex_event,'deepseek-harness':deepseek_event,'workbuddy':workbuddy_event,'qoder':qoder_event,'magpie':magpie_event}[source]
         errors = 0
         paths = _jsonl_files(root, source)
         read_errors = (OSError, EOFError, ValueError, RuntimeError, subprocess.SubprocessError)
@@ -316,7 +347,7 @@ def jsonl_usage(source, root, cache, start, end, zone, exclude_proxy=False, prox
                                 continue
                             if source != 'codex' and state.get('isSeeded') and row.get('type')=='session/end-seed' and (row.get('data') or {}).get('inherited'):
                                 conn.execute('DELETE FROM events WHERE file=?', (file_key,))
-                            event = parser(row, state)
+                            event = parser(row, {'offset':offset} if source == 'magpie' else state)
                             if event:
                                 conn.execute('INSERT OR REPLACE INTO events VALUES (?,?,?,?)', (event['id'], file_key, event['timestamp'], json.dumps(event)))
                         except (KeyError, TypeError, AttributeError, json.JSONDecodeError):
@@ -336,7 +367,7 @@ def jsonl_usage(source, root, cache, start, end, zone, exclude_proxy=False, prox
         conn.commit()
         try:carried = proxy_requests(proxy_log, cache, start, end) if proxy_log else None
         except (OSError, ValueError, sqlite3.Error):carried = None
-        result = aggregate(unique_events(conn, start, end), start, end, zone, exclude_proxy, codex_cost if source == 'codex' else model_cost, carried)
+        result = aggregate(unique_events(conn, start, end), start, end, zone, exclude_proxy, price or (codex_cost if source == 'codex' else model_cost), carried)
         result['proxyMatched'] = carried is not None
         if errors:
             result['warning'] = '部分记录无法读取'
@@ -439,10 +470,12 @@ def aggregate(events, start, end, zone, exclude_proxy=False, price=None, carried
         if cost is None and price: cost = price(event)
         first = ts if first is None else min(first, ts)
         day = datetime.fromtimestamp(ts, zone).date().isoformat()
-        sessions.add(event.get('session'))
+        if event.get('session') is not None:sessions.add(event['session'])
         for target in [summary, models.setdefault(event['model'], empty()), days.setdefault(day, empty()), hours.setdefault(int(ts//3600)*3600, empty())]:
             target['totalTokens'] += i + o + r + w; target['inputTokens'] += i + r + w
             target['outputTokens'] += o; target['cachedInputTokens'] += r; target['requests'] += 1; target['credits'] += credits
+            if 'cacheKnown' in event:
+                target['cacheEligibleInputTokens'] = target.get('cacheEligibleInputTokens',0) + (i+r+w if event['cacheKnown'] else 0)
             if cost is None: target['unpricedRequests'] += 1
             else: target['estimatedCostUsd'] += cost
     summary['sessions'] = len(sessions)

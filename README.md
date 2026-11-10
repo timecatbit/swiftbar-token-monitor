@@ -8,7 +8,7 @@ SwiftBar 菜单栏插件：在一个原生面板里查看各 AI 编程工具的 
 
 ## 能看什么
 
-- **Harness 用量**：Claude 桌面 App、ChatGPT（Codex）、OpenCodex、OpenCode、DeepSeek Harness、WorkBuddy、Qoder CN、Gemini CLI。显示 Token、请求、缓存命中、模型分布和趋势图，并按模型官方价估算 API 等值费用；Qoder CN 套餐请求在本机只记 Credits、不记 Token，卡片按 Credits 显示。范围可选当天、近 24 小时、近 7/30 天、本周、本月或全部。
+- **Harness 用量**：Claude 桌面 App、ChatGPT（Codex）、OpenCodex、Magpie、OpenCode、DeepSeek Harness、WorkBuddy、Qoder CN、Gemini CLI。显示 Token、请求、缓存命中、模型分布和趋势图，并按模型官方价估算 API 等值费用；Qoder CN 套餐请求在本机只记 Credits、不记 Token，卡片按 Credits 显示。范围可选当天、近 24 小时、近 7/30 天、本周、本月或全部。
 - **订阅**：ChatGPT、Claude、MiniMax 显示已用百分比和重置时间，70% 起变橙、90% 起变红，侧栏还会写出比匀速多用还是少用；Qoder CN 读取 Qoder CN App 本机记录的 Credits 用量（在 App 右下角打开 Credits 用量时更新）；Gemini、Grok、Kimi 可以手动标记。
 - **API**：DeepSeek、Kimi、Grok 显示余额；Qoder CN 用组织 API Key（团队版/企业版）显示组织共享的加购 Credits 余额；Claude 显示本月花费（需要管理员 Key）；ChatGPT、Gemini 可以测试 Key 是否可用。每个 API 可以保存多把 Key（同一把不能重复添加），主页显示合计和 Key 数量，如“余额 ¥12.00 (3)”；同一组织或 Team 的多把 Key 只算一次。
 - **提醒**：订阅窗口用到 90%（可改为 70%、80% 或关闭）时发通知；余额类 API 可以按币种设置余额低于多少时提醒；可选在每周额度快重置却还没怎么用时提醒。
@@ -61,6 +61,7 @@ python3 scripts/install.py
 
 - **统计范围**默认显示当天。首次安装会在后台读取这台 Mac 已有的用量记录；选「全部」可以查看仍保存在本机的记录，不需要发起新调用。Claude 只统计桌面 App 已登记的会话，ChatGPT 包含本机 Codex 的活动和归档会话。已经删除、从未同步到本机或没有记录 Token 的对话无法补算。
 - **左键星星**打开主页。Summary 旁边依次是自动检测（放大镜图标）、分享和刷新按钮，鼠标停上去会显示名称；把鼠标停在一行上，会在旁边展开详情和操作。
+- **Magpie**：读取本机网关的 `usage.jsonl`（默认 `~/.config/magpie`，也支持 `XDG_CONFIG_HOME` 或手选目录），只统计网关最终有用量的请求，不读 Key，也不要求 Magpie 正在运行。如果同期已有其他 Harness 用量，Magpie 单独展示、不叠加进 Summary；只开启 Magpie 时计入 Summary。费用是按已知价格的估算。
 - **右键星星 → 主页模块…** 选择要显示的模块，并设置记录目录、Key 和连接。
 - **自动检测**（主页按钮或右键星星）按本机已安装的工具重新勾选模块，会先列出将启用和取消的模块，确认前不会改动任何设置。
 - 不常用的设置写在 `~/Library/Application Support/SwiftBarToken/config.local.sh`，可用的变量见 [config.example.sh](config.example.sh)。

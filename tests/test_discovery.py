@@ -47,6 +47,16 @@ class DiscoveryTests(unittest.TestCase):
     def test_compressed_only_chatgpt_log_is_detected_without_executing_or_parsing(self):
         self.put('.codex/archived_sessions/day/one.jsonl.zst')
         self.assertIn('codex',self.detect())
+    def test_magpie_detects_xdg_log_without_reading_provider_configuration(self):
+        root=self.home/'xdg'
+        self.put('xdg/magpie/providers.json','PRIVATE KEY')
+        with patch.dict(os.environ,{'XDG_CONFIG_HOME':str(root)}):
+            self.assertNotIn('magpie',self.detect())
+            self.put('xdg/magpie/usage.jsonl','not parsed by discovery')
+            self.assertIn('magpie',self.detect())
+        self.assertNotIn('magpie',self.detect())
+        self.assertIn('magpie',self.detect({'magpie':root/'magpie'}))
+
     def test_configured_api_requirements_and_no_secret_persistence(self):
         key=self.put('key','PRIVATE-CREDENTIAL')
         with patch.dict(os.environ,{'DEEPSEEK_API_KEY_FILE':str(key),'MINIMAX_API_KEY':'PRIVATE-MINIMAX','XAI_MANAGEMENT_API_KEY':'PRIVATE-XAI'}):

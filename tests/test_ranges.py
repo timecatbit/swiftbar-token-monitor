@@ -82,6 +82,34 @@ class RangeTests(unittest.TestCase):
   dashboard=self.m.dashboard_payload(self.m.cached_data())
   self.assertEqual(dashboard['rangeKey'],'all')
   self.assertEqual(dashboard['providers'][0]['requests'],2)
+ def test_magpie_reads_existing_history_through_the_selected_range(self):
+  settings=dict(self.m.view_settings(),visible=['summary','magpie'],paths={'magpie':str(self.root)})
+  self.m.preferences.write(self.m.STATE_DIR,settings)
+  gateway={'agent':'codex','provider':'deepseek','model':'group/work','served':'deepseek-v4-pro','in':100,'out':10}
+  self.write('usage.jsonl',[dict(gateway,t='2026-09-01T01:00:00Z'),dict(gateway,t='2026-11-04T01:00:00Z')])
+  with patch.object(self.m,'usage_now',return_value=self.now):
+   today=self.m.range_usage_cached('today')[0]
+   history=self.m.range_usage_cached('all')[0]
+  self.assertEqual(today['magpie']['summary']['requests'],1)
+  self.assertEqual(history['magpie']['summary']['requests'],2)
+  self.assertEqual(history['magpie']['summary']['totalTokens'],220)
+  self.assertGreater(history['magpie']['summary']['estimatedCostUsd'],0)
+  self.assertEqual(history['magpie']['models'][0]['model'],'deepseek-v4-pro')
+
+ def test_magpie_only_contributes_to_summary_when_other_sources_have_no_usage(self):
+  self.m.preferences.write(self.m.STATE_DIR,dict(self.m.view_settings(),visible=['summary','magpie','claude']))
+  mp={'summary':{'requests':1,'totalTokens':20,'inputTokens':15,'cachedInputTokens':8,'cacheEligibleInputTokens':10}}
+  cc={'summary':{'requests':1,'totalTokens':30}}
+  for bundle,expected in (({'magpie':mp},True),({'magpie':mp,'claude':cc},False)):
+   d=self.m.dashboard_payload({'range_usage':dict(bundle,range='today')})
+   magpie=next(p for p in d['providers'] if p['id']=='magpie')
+   self.assertEqual(magpie['summaryIncluded'],expected)
+   self.assertEqual(magpie['tokens'],20)
+   self.assertEqual(magpie['cache'],.8)
+   if not expected:self.assertEqual(magpie['subtitle'],'未计入 Summary')
+  self.assertIn('magpie',self.m.selected_update_ids())
+  self.assertNotIn('magpie',self.m.live_app_update_ids())
+
  def test_invalid_selection_is_rejected(self):
   with self.assertRaises(ValueError):self.m.run_action('set-range',['../../bad'])
  def test_range_selector_actions_are_whitelisted(self):

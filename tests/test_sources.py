@@ -47,6 +47,31 @@ class SourceTests(unittest.TestCase):
         with path.open('a') as out:out.write(partial[30:]+'\n')
         self.assertEqual(self.read()['summary']['requests'],2)
         self.assertEqual(self.read()['summary']['requests'],2)
+    def test_magpie_indexes_gateway_history_without_probes_or_imported_records(self):
+        log=self.root/'usage.jsonl'
+        base={'agent':'codex','provider':'deepseek','model':'group/daily','served':'deepseek-v4-pro','route_id':7,
+              't':'2024-11-05T09:46:40.500000000Z','in':100,'out':20,'reasoning':5,'cache_read':70,'cache_write':10,
+              'session':'PRIVATE-SESSION','providerKeyName':'PRIVATE-KEY-LABEL','err':'PRIVATE-ERROR','cost':0.5}
+        later=dict(base,t='2024-11-12T09:46:40Z',cache_unknown=True,cache_read=0,cache_write=0)
+        self.write(log,[base,dict(base,handed_on=True),dict(base,source='reported'),dict(base,source='probe'),
+                        dict(base,source='mcp'),dict(base,source='search'),dict(base,rejected=True)])
+        self.write(self.root/'not-usage.jsonl',[base])
+        initial=self.read('magpie')
+        self.assertEqual(initial['summary']['requests'],1)
+        with log.open('a') as handle:handle.write(json.dumps(later)+'\n')
+        result=self.read('magpie')
+        self.assertEqual(result['summary']['totalTokens'],320)
+        self.assertEqual(result['summary']['requests'],2)
+        self.assertEqual(result['summary']['sessions'],1)
+        self.assertEqual(result['summary']['estimatedCostUsd'],1)
+        self.assertEqual(result['summary']['cacheEligibleInputTokens'],180)
+        self.assertEqual(result['models'][0]['model'],'deepseek-v4-pro')
+        self.assertEqual(self.read('magpie',start=1731024000)['summary']['requests'],1)
+        for path in self.cache.glob('*.sqlite3'):
+            self.assertNotIn(b'PRIVATE-',path.read_bytes())
+        self.write(log,[later])
+        self.assertEqual(self.read('magpie')['summary']['requests'],1)
+
     def test_missing_source_is_unavailable_not_zero(self):
         result=sources.jsonl_usage('codex',self.root/'missing',self.cache,0,9999999999,timezone.utc)
         self.assertIn('error',result);self.assertNotIn('summary',result)

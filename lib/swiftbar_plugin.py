@@ -143,6 +143,7 @@ def source_path(key):
         'workbuddy': os.environ.get('WORKBUDDY_USAGE_DIR') or HOME,
         'qoder': os.environ.get('QODERCN_CONFIG_DIR') or os.path.join(HOME,'.qoder-cn'),
         'gemini': os.environ.get('GEMINI_USAGE_DIR') or os.path.join(HOME,'.gemini'),
+        'magpie': str(sources.magpie_root(HOME)),
     }
     return os.path.expanduser(custom or defaults.get(key) or '')
 
@@ -961,9 +962,10 @@ UPDATE_LINKS = {'opencodex': RELEASES_URL, 'claude': 'https://claude.ai/download
 UPDATE_NAMES = {'opencodex':'OpenCodex', 'claude':'Claude', 'chatgpt':'ChatGPT', 'claude-code':'Claude Code', 'codex-cli':'Codex'}
 # Harness choices expand into related app/CLI checks. A configured OpenCodex
 # also includes ChatGPT and Codex without changing homepage selections.
-HARNESS_UPDATES = {'opencodex':'opencodex', 'claude':'claude', 'codex':'chatgpt',
+HARNESS_UPDATES = {'opencodex':'opencodex', 'magpie':'magpie', 'claude':'claude', 'codex':'chatgpt',
                    'opencode':'opencode', 'deepseek-harness':'deepseek-harness', 'workbuddy':'workbuddy', 'qoder':'qoder', 'gemini':'gemini'}
-MANUAL_UPDATES = {'opencode':('OpenCode','https://opencode.ai'),
+MANUAL_UPDATES = {'magpie':('Magpie','https://github.com/yetone/magpie/releases/latest'),
+                  'opencode':('OpenCode','https://opencode.ai'),
                   'deepseek-harness':('DeepSeek Harness','https://github.com/deepseek-ai/deepseek-harness/releases'),
                   'workbuddy':('WorkBuddy','https://cloud.tencent.com/product/workbuddy'),
                   'qoder':('Qoder CN','https://qoder.cn/download'),
@@ -971,7 +973,7 @@ MANUAL_UPDATES = {'opencode':('OpenCode','https://opencode.ai'),
 UPDATE_NAMES.update({key:value[0] for key,value in MANUAL_UPDATES.items()})
 UPDATE_LINKS.update({key:value[1] for key,value in MANUAL_UPDATES.items()})
 # Desktop apps update themselves: when installed, their rows open the app instead of a download page.
-UPDATE_APPS = {'claude':('Claude',), 'chatgpt':('ChatGPT',), 'workbuddy':('WorkBuddy',), 'qoder':('Qoder CN','QoderCN')}
+UPDATE_APPS = {'magpie':('magpie','Magpie'), 'claude':('Claude',), 'chatgpt':('ChatGPT',), 'workbuddy':('WorkBuddy',), 'qoder':('Qoder CN','QoderCN')}
 
 def selected_update_ids():
     visible=set(view_settings()['visible'])
@@ -1724,6 +1726,18 @@ def ocx_range_usage(key,now):
         payload['chartIncomplete']=bool(timeline.get('missingMeasurements'))
     return payload
 
+def magpie_price(event):
+    model=event['model'].lower().rsplit('/',1)[-1]
+    if model.startswith('claude-'):
+        one_hour=event['write1h']
+        return claude_price(model,(event['input'],event['output'],event['writes']-one_hour,one_hour,event['cached']),
+                            speed='fast' if event['fast'] else 'standard')
+    if model.startswith(('gpt-','o1','o3','o4')):
+        cost=sources.codex_cost(dict(event,model=model))
+        if cost is not None:return cost
+    return sources.model_cost(event)
+
+
 def range_usage_cached(key=None):
     key=key or selected_range();name=range_cache_name(key)
     def load():
@@ -1738,6 +1752,7 @@ def range_usage_cached(key=None):
                     return value or {'error':'未找到 Claude App 记录'}
                 root=source_path(source)
                 if not root:return {'error':'请选择记录目录'}
+                if source=='magpie':return sources.jsonl_usage(source,root,CACHE_DIR,start,end,now.tzinfo,price=magpie_price)
                 if source=='gemini':return sources.gemini_usage(root,CACHE_DIR,start,end,now.tzinfo,'opencodex' in enabled)
                 if source=='opencode':return sources.opencode_usage(root,start,end,now.tzinfo,'opencodex' in enabled)
                 proxy_log=ocx_request_log() if source=='codex' and 'opencodex' in enabled else None
@@ -2448,6 +2463,12 @@ def module_connections(data=None):
                 if locations:children.insert(1,location_entry('读取目录' if any(os.path.exists(p) for p in locations) else '默认目录 · 尚未生成',locations))
                 if any(os.path.exists(p) for p in locations):children.insert(2,{'label':'在 Finder 中打开','symbol':'folder','action':['reveal-source',key],'children':[]})
             connections[key]={'label':label,'value':'已配置' if configured else '未配置','symbol':'folder','children':children}
+            if key=='magpie':
+                children[0]['label']='来源 · Magpie 本机网关记录' if configured else '未发现 Magpie 或网关记录'
+                if configured:
+                    children.insert(1,{'label':'只读取 usage.jsonl','children':[]})
+                app=update_app_path(key)
+                if app:children.append({'label':'打开 Magpie','symbol':'macwindow','href':'file://'+urllib.parse.quote(app),'children':[]})
             if key=='codex':
                 children[0]['label']='来源 · 编程客户端的本机记录'
                 children.insert(1,{'label':'仅编程会话，不含普通聊天','children':[]})
@@ -3040,7 +3061,10 @@ def dashboard_payload(data):
     start,end=range_bounds(key,now)
     start=bundle.get('start',start);end=bundle.get('end',end)
     selected=[(k,label,bundle.get(k) or {}) for k,label,category in preferences.MODULES if k in preferences.USAGE and module_enabled(k)]
-    usage_sources=[u for k,label,u in selected]
+    # Gateway logs and harness histories can describe the same request. Magpie can serve
+    # any harness and its logs don't share a stable request ID with those local histories.
+    magpie_separate=any(k!='magpie' and not u.get('error') and number((u.get('summary') or {}).get('requests'))>0 for k,_,u in selected)
+    usage_sources=[u for k,_,u in selected if k!='magpie' or not magpie_separate]
     oc=bundle.get('opencodex') or {};cc=bundle.get('claude') or {}
     short=key in ('today','24h')
     if short:
@@ -3069,7 +3093,7 @@ def dashboard_payload(data):
                     for row in sorted(models,key=weight,reverse=True)[:3]]
         points={int(row.get('timestamp',0)):number(row.get('totalTokens')) for row in usage.get('hours',[])} if short else {str(row.get('date',''))[:10]:number(row.get('totalTokens')) for row in usage.get('days',[])}
         history=[points.get(slot,0) for slot in slots]
-        inputs=number(summary.get('inputTokens'));cache=number(summary.get('cacheReadInputTokens') or summary.get('cachedInputTokens'))
+        inputs=number(summary.get('cacheEligibleInputTokens',summary.get('inputTokens')));cache=number(summary.get('cacheReadInputTokens') or summary.get('cachedInputTokens'))
         cost=summary_cost_value(summary)
         if cost is not None:cost=number(cost)
         requests=int(number(summary.get('requests')));unpriced=int(number(summary.get('unpricedRequests')))
@@ -3094,7 +3118,8 @@ def dashboard_payload(data):
     proxy_available=any(p['id']=='opencodex' and p['available'] for p in providers)
     matched={source for source,_,usage in selected if usage.get('proxyMatched')}
     for p in providers:
-        p['summaryIncluded']=not (p['id']=='codex' and proxy_available and 'codex' not in matched)
+        p['summaryIncluded']=not ((p['id']=='codex' and proxy_available and 'codex' not in matched)
+                                   or (p['id']=='magpie' and magpie_separate))
         if not p['summaryIncluded']:p['subtitle']='未计入 Summary'
     # Crop only today's chart, never the statistics window. Preserve a short zero
     # lead-in before the earliest source activity, and use actual time spacing.

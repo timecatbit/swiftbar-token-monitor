@@ -8,6 +8,7 @@ import swiftbar_catalog as catalog
 import swiftbar_preferences as preferences
 import swiftbar_claude as claude_desktop
 import swiftbar_qoder as qoder
+from swiftbar_sources import magpie_root
 from swiftbar_config import monitor_url
 
 
@@ -31,6 +32,9 @@ def detect(paths, home=None, configured_proxy=False, komari_url='', which=shutil
     if configured_proxy:found.update(('opencodex','chatgpt'))
     for source,binary in (('codex','codex'),('opencode','opencode'),('gemini','gemini'),('deepseek-harness','dsh')):
         if which(binary):found.add(source)
+    magpie_log=Path(paths.get('magpie') or magpie_root(home))/'usage.jsonl'
+    if which('magpie') or magpie_log.is_file() or any((Path(root)/name).is_dir() for root in app_roots for name in ('magpie.app','Magpie.app')):
+        found.add('magpie')
     if any((Path(root)/'WorkBuddy.app').is_dir() for root in app_roots):found.add('workbuddy')
     root=Path(paths.get('qoder') or os.environ.get('QODERCN_CONFIG_DIR') or home/'.qoder-cn')
     if which('qodercn') or any((Path(r)/name).is_dir() for r in app_roots for name in ('Qoder CN.app','QoderCN.app')) or has_records(root/'projects'):found.add('qoder')
