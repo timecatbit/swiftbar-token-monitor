@@ -43,16 +43,12 @@ def keychain_account():
     return name if re.fullmatch(r'[A-Za-z0-9._-]+',name) else 'claude-code-user'
 
 
-def keychain_data():
-    """Use the signed system reader; never put credentials in command arguments.
-    The item Claude Code reads (service and account) comes first: with only the service,
-    security returns whichever same-named item it finds first, possibly a stale one."""
-    for account in (keychain_account(),None):
-        try:
-            run=subprocess.run(['/usr/bin/security','find-generic-password']+(['-a',account] if account else [])+['-s','Claude Code-credentials','-w'],
-                capture_output=True,timeout=8,check=False)
-        except (OSError,subprocess.SubprocessError):raise OAuthError('keychain','钥匙串读取未完成，请手动重试授权') from None
-        if run.returncode!=44:break
+def keychain_data(account):
+    """Read one Keychain match without putting its credential in command arguments."""
+    try:
+        run=subprocess.run(['/usr/bin/security','find-generic-password']+(['-a',account] if account else [])+['-s','Claude Code-credentials','-w'],
+            capture_output=True,timeout=8,check=False)
+    except (OSError,subprocess.SubprocessError):raise OAuthError('keychain','钥匙串读取未完成，请手动重试授权') from None
     if run.returncode==44:raise OAuthError('missing','请先在 Claude Code 登录订阅账户')
     if run.returncode:raise OAuthError('keychain','钥匙串未授权，请点击授权读取登录')
     # security prints the stored value as bare hex digits when any byte is not printable
@@ -78,19 +74,29 @@ def login_document(raw):
 def credentials():
     if ',' in os.environ.get('CLAUDE_CONFIG_DIR',''):raise OAuthError('profile','多个 Claude 目录，请指定单一登录来源')
     root=config_root();default=Path.home()/'.claude'
-    data=None;unreadable=None
+    data=None;unreadable=None;legacy=False
     if root==default:
         try:
-            data=login_document(keychain_data())
+            data=login_document(keychain_data(keychain_account()))
             if data is None:unreadable='Claude Code 钥匙串里的登录无法解析'
         except OAuthError as error:
             if error.code!='missing':raise
-    # Like Claude Code, use .credentials.json when the keychain holds no readable login.
+            legacy=True
     if data is None:
         try:
             with (root/'.credentials.json').open('rb') as stream:data=login_document(stream.read(MAX_RESPONSE+1))
-            if data is None:unreadable='Claude Code 登录文件无法解析'
-        except OSError:pass
+        except FileNotFoundError:pass
+        except OSError:raise OAuthError('credential','Claude Code 登录文件无法读取') from None
+        else:
+            if data is None:raise OAuthError('credential','Claude Code 登录文件无法解析')
+    if data is None and legacy:
+        # Older installs may have used a different Keychain account name.
+        # A service-only lookup can pick a stale item, so only use it without a local file.
+        try:
+            data=login_document(keychain_data(None))
+            if data is None:unreadable='Claude Code 钥匙串里的登录无法解析'
+        except OAuthError as error:
+            if error.code!='missing':raise
     if data is None:raise OAuthError('credential',unreadable) if unreadable else OAuthError('missing','请先在 Claude Code 登录订阅账户')
     oauth=data.get('claudeAiOauth')
     # Signed in with an API key, or only MCP logins stored: no subscription login to read.

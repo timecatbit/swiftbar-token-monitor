@@ -103,10 +103,20 @@ class OAuthTests(unittest.TestCase):
    oauth.credentials()
   self.assertEqual(run.call_args.args[0][2:4],['-a','mini.coke'])
   # Saved under another account by an older version: the service alone still finds it.
-  with patch.dict(os.environ,{'CLAUDE_CONFIG_DIR':'','USER':'mini coke'}),patch.object(oauth.subprocess,'run',side_effect=[Mock(returncode=44,stdout=b''),found]) as run:
+  with patch.dict(os.environ,{'CLAUDE_CONFIG_DIR':'','HOME':str(self.root),'USER':'mini coke'}),patch.object(oauth.subprocess,'run',side_effect=[Mock(returncode=44,stdout=b''),found]) as run:
    oauth.credentials()
   self.assertEqual(run.call_args_list[0].args[0][2:4],['-a','claude-code-user'])
   self.assertNotIn('-a',run.call_args_list[1].args[0])
+ def test_valid_file_wins_over_a_stale_service_only_keychain_item(self):
+  root=self.root/'.claude';root.mkdir()
+  (root/'.credentials.json').write_text(json.dumps(self.login(accessToken='current-file-fixture-token')))
+  missing=Mock(returncode=44,stdout=b'')
+  stale=Mock(returncode=0,stdout=b'{"mcpOAuth":{}}')
+  with patch.dict(os.environ,{'CLAUDE_CONFIG_DIR':'','HOME':str(self.root),'USER':'fixture'}),patch.object(oauth.subprocess,'run',side_effect=[missing,stale]) as run:
+   credential=oauth.credentials()
+  self.assertEqual(credential['token'],'current-file-fixture-token')
+  run.assert_called_once()
+  self.assertEqual(run.call_args.args[0][2:4],['-a','fixture'])
  def test_unreadable_keychain_login_falls_back_to_the_file_like_claude_code(self):
   home=self.root/'home';(home/'.claude').mkdir(parents=True)
   with patch.dict(os.environ,{'CLAUDE_CONFIG_DIR':'','HOME':str(home)}),patch.object(oauth,'keychain_data',return_value=b'not a login'):
