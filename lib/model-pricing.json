@@ -1,8 +1,8 @@
 {
  "source": {
   "project": "ccusage",
-  "commit": "0c1bdd193524dcbbceef9caae3a5f4e8f8d06b9d",
-  "committedAt": "2026-11-09T03:03:51Z",
+  "commit": "373fdd19997c97c380f0490a6e377f8c65a3a39d",
+  "committedAt": "2026-11-10T11:49:29Z",
   "license": "MIT"
  },
  "models": {
@@ -259,12 +259,6 @@
    "cacheRead": 0.00825,
    "cacheWrite": 0.4125
   },
-  "deepseek-v4-1-flash-uncensored": {
-   "input": 0.33,
-   "output": 1.32,
-   "cacheRead": 0.00825,
-   "cacheWrite": 0.4125
-  },
   "deepseek-v4-flash": {
    "input": 0.15,
    "output": 0.6,
@@ -366,6 +360,12 @@
    "output": 0.39,
    "cacheRead": 0.00975,
    "cacheWrite": 0.121875
+  },
+  "deepseek-v4.1-flash-uncensored": {
+   "input": 0.18,
+   "output": 0.65,
+   "cacheRead": 0.005,
+   "cacheWrite": 0.225
   },
   "gemini-2.0-flash-lite": {
    "input": 0.075,
@@ -686,12 +686,6 @@
    "output": 0.1,
    "cacheRead": 0.01,
    "cacheWrite": 0.125
-  },
-  "glm-4-long": {
-   "input": 0.2006,
-   "output": 0.2006,
-   "cacheRead": 0.1003,
-   "cacheWrite": 0.25075
   },
   "glm-4.5": {
    "input": 0.6,
