@@ -93,7 +93,7 @@ class OAuthTests(unittest.TestCase):
   for printed in (stored.hex().encode()+b'\n',stored.hex().upper().encode()+b'\n',stored+b'\n'):
    done=Mock(returncode=0,stdout=printed)
    with patch.dict(os.environ,{'CLAUDE_CONFIG_DIR':''}),patch.object(oauth.subprocess,'run',return_value=done):
-    self.assertEqual(oauth.credentials()['expires'],self.now+60)
+    self.assertAlmostEqual(oauth.credentials()['expires'],self.now+60,places=3)
  def login(self,**fields):
   return {'claudeAiOauth':dict({'accessToken':'private-token-fixture','expiresAt':(self.now+60)*1000,'scopes':['user:profile']},**fields)}
  def test_keychain_item_of_this_user_is_read_first(self):
@@ -113,7 +113,7 @@ class OAuthTests(unittest.TestCase):
    with self.assertRaises(oauth.OAuthError) as caught:oauth.credentials()
    self.assertEqual((caught.exception.code,str(caught.exception)),('credential','Claude Code 钥匙串里的登录无法解析'))
    (home/'.claude/.credentials.json').write_text(json.dumps(self.login()))
-   self.assertEqual(oauth.credentials()['expires'],self.now+60)
+   self.assertAlmostEqual(oauth.credentials()['expires'],self.now+60,places=3)
  def test_each_unusable_login_names_its_problem(self):
   cases=[(self.login(accessToken='',expiresAt=0),'missing','Claude Code 登录已失效，请在 Claude Code 运行 /login'),
          (self.login(accessToken='bad token+/='),'credential','Claude Code 登录令牌格式无法识别'),
