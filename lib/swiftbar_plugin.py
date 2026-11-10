@@ -19,6 +19,8 @@ import hashlib
 import fcntl
 import time
 import shlex
+import socket
+import ssl
 import base64
 import os
 import re
@@ -1017,10 +1019,27 @@ def installed_app_info(name):
         except (OSError,ValueError):pass
     return {}
 
+class UpdateCheckError(Exception):
+    """Why a version source could not be read: its host and the failure, never the request."""
+
+
+def connection_problem(error):
+    reason=getattr(error,'reason',error);text=str(reason)
+    if isinstance(reason,ssl.SSLCertVerificationError) or 'CERTIFICATE_VERIFY_FAILED' in text:return '证书验证失败（Python 缺少根证书）'
+    if isinstance(reason,(TimeoutError,socket.timeout)) or 'timed out' in text:return '连接超时（检查网络或代理）'
+    if isinstance(reason,socket.gaierror):return '域名无法解析（检查网络或代理）'
+    if isinstance(reason,ConnectionRefusedError):return '连接被拒绝（检查代理）'
+    return '无法连接（检查网络或代理）'
+
+
 def release_body(url):
+    host=urllib.parse.urlsplit(url).hostname or ''
     req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0 OpenCodex-SwiftBar/4.8','Accept':'application/json, application/xml, text/plain'})
-    with urllib.request.urlopen(req,timeout=8) as response:
-        body=response.read(1024*1024+1)
+    try:
+        with urllib.request.urlopen(req,timeout=8) as response:
+            body=response.read(1024*1024+1)
+    except urllib.error.HTTPError as error:raise UpdateCheckError('%s 返回 HTTP %d'%(host,error.code)) from None
+    except (urllib.error.URLError,OSError) as error:raise UpdateCheckError(host+' '+connection_problem(error)) from None
     if len(body)>1024*1024:raise ValueError('release metadata too large')
     return body
 
@@ -1103,8 +1122,10 @@ def app_update_probe(key):
         row['available']=newer_release(row['latest'],row['current'])
         if row.get('build'):row['available']=newer_release(row['build'],row['currentBuild'])
         row['status']='有新版本' if row['available'] else '已是最新'
-    except Exception:
-        row.update(status='检查失败，稍后重试',available=False)
+    except Exception as error:
+        # The reason is shown under the row: it is what tells a missing certificate from a blocked network.
+        reason=str(error) if isinstance(error,UpdateCheckError) else '读取本机版本失败' if isinstance(error,subprocess.SubprocessError) else '版本信息无法识别'
+        row.update(status='检查失败，稍后重试',available=False,reason=reason)
     if key=='chatgpt':row=apply_chatgpt_release(row,app_info('ChatGPT'))
     return row
 
@@ -1440,6 +1461,7 @@ def app_update_lines(data):
         detail='尚未接入自动版本检查' if row.get('manual') else (row.get('current') or '版本待确认')
         if row.get('available'):detail+=' → '+str(row.get('latest'))
         if row.get('channel'):detail+=' · '+row['channel']
+        if row.get('reason'):detail+='\n'+row['reason']
         if row.get('available') and row['id'] in ('claude-code','codex-cli'):
             detail+='\n点击运行 '+('claude update' if row['id']=='claude-code' else 'codex update')
             lines.append(item(label,level=1,paneldetail=detail,panelstatus=update_indicator(row),**act('update-cli',row['id'])))

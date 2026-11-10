@@ -38,6 +38,19 @@ class UpdateTests(unittest.TestCase):
   with patch.object(self.m,'app_info',return_value={'CFBundleShortVersionString':'4.4212.0'}),patch.object(self.m,'release_body',side_effect=TimeoutError):
    row=self.m.app_update_probe('claude')
   self.assertFalse(row['available']);self.assertIn('失败',row['status'])
+ def test_failed_check_says_what_stopped_it(self):
+  # 检查失败 alone could not tell a Python without root certificates from a blocked network.
+  errors=self.m.urllib.error
+  cases=[(errors.URLError(self.m.ssl.SSLCertVerificationError(1,'[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed')),'api.anthropic.com 证书验证失败（Python 缺少根证书）'),
+         (errors.URLError(self.m.socket.timeout('timed out')),'api.anthropic.com 连接超时（检查网络或代理）'),
+         (errors.HTTPError('https://api.anthropic.com/x',403,'Forbidden',{},None),'api.anthropic.com 返回 HTTP 403')]
+  for error,reason in cases:
+   with patch.object(self.m,'app_info',return_value={'CFBundleShortVersionString':'4.4212.0'}),patch.object(self.m.urllib.request,'urlopen',side_effect=error):
+    row=self.m.app_update_probe('claude')
+   self.assertEqual((row['status'],row['reason']),('检查失败，稍后重试',reason))
+  with patch.object(self.m,'update_rows',return_value=[row]):
+   detail=next(l for l in self.m.app_update_lines({}) if 'paneldetail=' in l)
+  self.assertIn('返回 HTTP 403',detail)
  def test_plugin_update_notices_say_it_was_the_plugin(self):
   with patch.object(self.m,'install_release'),patch.object(self.m,'notify') as notice,patch.object(self.m.subprocess,'run'),patch.object(self.m,'refresh_swiftbar'):
    self.m.self_update_worker('99.0.0')
