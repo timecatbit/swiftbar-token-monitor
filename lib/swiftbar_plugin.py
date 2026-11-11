@@ -917,6 +917,9 @@ def claude_price(model, metrics, speed='standard', geo='global', tier='standard'
 def claude_usage_live(root=None, db_path=None, now=None, range_key="today", carriers=None):
     root=root or source_path('claude')
     paths,ids=claude_desktop.transcript_files(root,HOME)
+    # Only the desktop App's own sessions count; say so when there are none, since Claude Code
+    # sessions from a terminal sit in the same folders and are left out on purpose.
+    if not ids:return {'error':'只统计桌面 App，未找到会话'},None
     if not paths:return {'error':'Claude App 暂无可读取用量'},None
     return claude_usage_records(root,db_path,now,range_key,paths,ids,carriers)
 

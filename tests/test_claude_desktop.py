@@ -47,7 +47,8 @@ class DesktopTests(unittest.TestCase):
  def test_cli_only_is_not_mislabeled_as_desktop_usage(self):
   self.transcript(OTHER)
   data,_=self.m.claude_usage_live(self.root,now=self.now)
-  self.assertIn('暂无可读取',data['error']);self.assertNotIn('summary',data)
+  # Claude Code from a terminal writes the same transcripts; the card says why they are left out.
+  self.assertEqual(data,{'error':'只统计桌面 App，未找到会话'})
  def test_multiple_config_roots_keep_only_app_registered_sessions(self):
   self.register();owned=self.transcript(SESSION);cli=self.transcript(OTHER)
   xdg=self.home/'.config/claude/projects';xdg.mkdir(parents=True)
