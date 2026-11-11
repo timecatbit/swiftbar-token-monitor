@@ -27,7 +27,17 @@ class TerminalTests(unittest.TestCase):
   with patch.object(terminal.subprocess,'run',return_value=types.SimpleNamespace(returncode=0)) as run:
    terminal.launch('true','Terminal',self.root)
   self.assertIn('do script',run.call_args.args[0][-1])
-  self.assertIn('exec "${SHELL:-/bin/zsh}" -l',terminal.bootstrap('true'))
+ def test_job_tab_shows_only_the_job_and_starts_no_second_login_shell(self):
+  script=terminal.bootstrap('echo job')
+  # A login shell would load the user's rc files again, and nvm prints "Now using node" from there.
+  self.assertNotIn('exec',script);self.assertNotIn(' -l',script)
+  home=self.root/'home';home.mkdir()
+  (home/'.zshrc').write_text('echo "Now using node v22"\n');(home/'.bash_profile').write_text('echo "Now using node v22"\n')
+  result=subprocess.run(['/bin/bash','-c',script],capture_output=True,text=True,timeout=5,stdin=subprocess.DEVNULL,env=dict(os.environ,HOME=str(home),SHELL='/bin/zsh'))
+  self.assertEqual(result.returncode,0);self.assertEqual(result.stdout,'job\n')
+  failing=subprocess.run(['/bin/bash','-c',terminal.bootstrap('exit 3')],capture_output=True,timeout=5,stdin=subprocess.DEVNULL)
+  self.assertEqual(failing.returncode,3)
+  self.assertIn("read -r _",script);self.assertIn('\\033[2J',script)
  def test_apple_event_failure_falls_back_to_private_unique_files(self):
   for _ in range(2):
    with patch.object(terminal.subprocess,'run',side_effect=[types.SimpleNamespace(returncode=1),types.SimpleNamespace(returncode=0)]):
