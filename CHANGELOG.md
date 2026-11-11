@@ -1,5 +1,9 @@
 # 更新记录
 
+## 5.16.1
+
+- 修复 Node 等终端启动提示占用菜单栏星星的问题。SwiftBar 直接启动插件，本地配置中的普通输出也不会进入菜单。
+
 ## 5.16.0
 
 - 同时勾选 Magpie 或 OpenCodex 和经过它的 Harness（如 ChatGPT、Claude）时，逐条比对请求，经过网关的只由网关计入 Summary；Harness 卡片仍显示自己的全部记录，并注明“N 次已由 Magpie 计入”。
