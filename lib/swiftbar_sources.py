@@ -206,6 +206,15 @@ def deepseek_event(row, state):
     return None
 
 
+def dsh_sessions_root(home):
+    explicit = os.environ.get('DSH_SESSIONS_DIR', '').strip()
+    if explicit:
+        return Path(os.path.expanduser(explicit))
+    configured = os.environ.get('DSH_HOME', '').strip()
+    root = Path(os.path.expanduser(configured)) if configured else Path(home)/'.dsh'
+    return root/'sessions'
+
+
 def magpie_root(home):
     configured = os.environ.get('MAGPIE_USAGE_DIR')
     if configured:

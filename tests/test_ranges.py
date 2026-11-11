@@ -82,6 +82,23 @@ class RangeTests(unittest.TestCase):
   dashboard=self.m.dashboard_payload(self.m.cached_data())
   self.assertEqual(dashboard['rangeKey'],'all')
   self.assertEqual(dashboard['providers'][0]['requests'],2)
+ def test_default_deepseek_directory_reads_preinstall_history_without_new_calls(self):
+  home=Path(self.temp.name)/'home'
+  old=home/'.dsh/sessions/project/old/session.v4.jsonl'
+  old.parent.mkdir(parents=True)
+  rows=[{'type':'session','id':'old-session','version':4},
+        {'type':'assistant/message','time':'2026-09-01T01:00:00Z','seq':1,
+         'data':{'turn':1,'step':1,'message':{'model':'deepseek-v4-flash'},'usage':{'inputTokens':100,'outputTokens':25,'cacheReadTokens':75}}}]
+  old.write_text(''.join(json.dumps(row)+'\n' for row in rows))
+  self.m.preferences.write(self.m.STATE_DIR,dict(self.m.view_settings(),visible=['summary','deepseek-harness']))
+  with patch.dict(self.m.os.environ,{'DSH_HOME':'','DSH_SESSIONS_DIR':''}),patch.object(self.m,'HOME',str(home)),patch.object(self.m,'usage_now',return_value=self.now):
+   self.assertIn('deepseek-harness',self.m.detected_modules())
+   today=self.m.range_usage_cached('today')[0]['deepseek-harness']
+   history=self.m.range_usage_cached('all')[0]['deepseek-harness']
+  self.assertEqual(today['summary']['requests'],0)
+  self.assertEqual(history['summary']['requests'],1)
+  self.assertEqual(history['summary']['totalTokens'],200)
+
  def test_magpie_reads_existing_history_through_the_selected_range(self):
   settings=dict(self.m.view_settings(),visible=['summary','magpie'],paths={'magpie':str(self.root)})
   self.m.preferences.write(self.m.STATE_DIR,settings)

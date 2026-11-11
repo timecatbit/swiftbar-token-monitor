@@ -139,7 +139,7 @@ def source_path(key):
         'claude': os.environ.get('CLAUDE_APP_DATA_DIR') or str(claude_desktop.default_root(HOME)),
         'codex': os.environ.get('CODEX_USAGE_DIR') or codex_home,
         'opencode': os.environ.get('OPENCODE_DATA_DIR') or os.path.join(os.path.expanduser(os.environ.get('XDG_DATA_HOME') or os.path.join(HOME, '.local', 'share')), 'opencode'),
-        'deepseek-harness': os.environ.get('DSH_SESSIONS_DIR') or '',
+        'deepseek-harness': str(sources.dsh_sessions_root(HOME)),
         'workbuddy': os.environ.get('WORKBUDDY_USAGE_DIR') or HOME,
         'qoder': os.environ.get('QODERCN_CONFIG_DIR') or os.path.join(HOME,'.qoder-cn'),
         'gemini': os.environ.get('GEMINI_USAGE_DIR') or os.path.join(HOME,'.gemini'),
@@ -2525,6 +2525,7 @@ def module_connections(data=None):
         if key in preferences.USAGE and key!='opencodex':
             custom=bool(view_settings()['paths'].get('claude-app' if key=='claude' else key))
             configured=key in found or bool(custom and os.path.exists(source_path(key)))
+            if key=='deepseek-harness':configured=os.path.isdir(source_path(key))
             children=[{'label':('来源 · 自定记录目录' if custom else '来源 · 自动读取本机客户端') if configured else '未发现客户端或用量记录','children':[]},{'label':'选择记录目录…','action':['choose-source',key],'children':[]},
                       {'label':'恢复自动查找','action':['auto-source',key],'children':[]}]
             if configured:

@@ -47,6 +47,17 @@ class DiscoveryTests(unittest.TestCase):
     def test_compressed_only_chatgpt_log_is_detected_without_executing_or_parsing(self):
         self.put('.codex/archived_sessions/day/one.jsonl.zst')
         self.assertIn('codex',self.detect())
+    def test_deepseek_harness_uses_the_default_session_store_or_a_dsh_home_override(self):
+        self.put('.dsh/sessions/work/one/session.v4.jsonl.zstd')
+        self.assertIn('deepseek-harness',self.detect())
+        other=self.home/'separate-dsh'
+        with patch.dict(os.environ,{'DSH_HOME':str(other)}):
+            self.assertNotIn('deepseek-harness',self.detect())
+            self.put('separate-dsh/sessions/work/old/session.jsonl')
+            self.assertIn('deepseek-harness',self.detect())
+            with patch.dict(os.environ,{'DSH_SESSIONS_DIR':str(self.home/'empty')}):
+                self.assertNotIn('deepseek-harness',self.detect())
+
     def test_magpie_detects_xdg_log_without_reading_provider_configuration(self):
         root=self.home/'xdg'
         self.put('xdg/magpie/providers.json','PRIVATE KEY')

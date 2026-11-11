@@ -8,7 +8,7 @@ import swiftbar_catalog as catalog
 import swiftbar_preferences as preferences
 import swiftbar_claude as claude_desktop
 import swiftbar_qoder as qoder
-from swiftbar_sources import magpie_root
+from swiftbar_sources import dsh_sessions_root, magpie_root
 from swiftbar_config import monitor_url
 
 
@@ -52,7 +52,7 @@ def detect(paths, home=None, configured_proxy=False, komari_url='', which=shutil
         database=root/'opencode.db' if root.is_dir() else root
         if database.is_file() and database.stat().st_size>0:found.add('opencode')
     except OSError:pass
-    if has_records(paths.get('deepseek-harness'),('session*.jsonl','session*.jsonl.zstd')):found.add('deepseek-harness')
+    if has_records(paths.get('deepseek-harness') or dsh_sessions_root(home),('session*.jsonl','session*.jsonl.zstd')):found.add('deepseek-harness')
     root=Path(paths.get('gemini') or home/'.gemini')
     if has_records(root/'tmp' if (root/'tmp').is_dir() else root,('session-*.json','session-*.jsonl','chats/**/*.jsonl')):found.add('gemini')
     root=Path(paths.get('workbuddy') or home)

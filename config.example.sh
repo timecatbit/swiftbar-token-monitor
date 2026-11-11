@@ -13,7 +13,7 @@
 # export CODEX_USAGE_DIR="$HOME/.codex"
 # export MAGPIE_USAGE_DIR="$HOME/.config/magpie"  # Directory containing Magpie usage.jsonl.
 # export OPENCODE_DATA_DIR="$HOME/.local/share/opencode"
-# export DSH_SESSIONS_DIR="/path/to/your/harness/session-logs"
+# export DSH_SESSIONS_DIR="/path/to/your/harness/session-logs"  # Overrides $DSH_HOME/sessions or ~/.dsh/sessions.
 # export OCX_TIMEZONE="Asia/Taipei"  # Default: system timezone.
 # export OCX_PYTHON="/path/to/python3"
 # export WORKBUDDY_USAGE_DIR="$HOME/.workbuddy-ai/projects"  # Default: both current and legacy WorkBuddy.
