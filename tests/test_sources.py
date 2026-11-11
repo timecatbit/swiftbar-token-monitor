@@ -72,6 +72,19 @@ class SourceTests(unittest.TestCase):
         self.write(log,[later])
         self.assertEqual(self.read('magpie')['summary']['requests'],1)
 
+    def test_magpie_totals_each_client_it_served(self):
+        log=self.root/'usage.jsonl'
+        base={'provider':'codex','model':'gpt-6.1-sol','t':'2024-11-05T09:46:40Z','in':100,'out':10,'cache_read':40,'status':200}
+        self.write(log,[dict(base,agent='codex'),dict(base,agent='codex',out=20),dict(base,agent='claude',**{'in':50}),dict(base)])
+        result=self.read('magpie')
+        clients={row['agent']:row for row in result['clients']}
+        self.assertEqual(clients['codex'],{'agent':'codex','totalTokens':310,'requests':2})
+        self.assertEqual(clients['claude']['totalTokens'],100);self.assertEqual(clients['']['requests'],1)
+        # Other sources name no client, so their results carry none.
+        self.write(self.root/'one.jsonl',[self.codex()])
+        self.assertNotIn('clients',self.read())
+        # The index that predates clients is not reused.
+        self.assertTrue(any(path.name.startswith('harness-v5-magpie-') for path in self.cache.glob('*.sqlite3')))
     def test_magpie_skips_refusals_and_prices_the_tier_it_asked_for(self):
         base={'agent':'codex','provider':'codex','model':'gpt-6.1-sol','t':'2024-11-05T09:46:40Z','in':100,'out':10,'status':200}
         event=lambda **row:sources.magpie_event(dict(base,**row),{'offset':1})

@@ -148,6 +148,13 @@ class RangeTests(unittest.TestCase):
    self.assertEqual(c['subtitle'],note)
   self.assertIn('magpie',self.m.selected_update_ids())
   self.assertNotIn('magpie',self.m.live_app_update_ids())
+  # Magpie's clients read as the homepage names them, merged and largest first.
+  mp['clients']=[{'agent':'claude','totalTokens':20},{'agent':'codex','totalTokens':60},{'agent':'claude-code','totalTokens':10},{'agent':'omp','totalTokens':10},{'agent':'pi','totalTokens':0}]
+  with patch.object(self.m,'usage_now',return_value=self.now):
+   d=self.m.dashboard_payload({'range_usage':{'range':'today','magpie':mp}})
+  rows=next(r for r in d['providers'] if r['id']=='magpie')['clients']
+  self.assertEqual([(r['name'],r['share']) for r in rows],[('ChatGPT',.6),('Claude Code',.3),('omp',.1)])
+  self.assertNotIn('clients',{k for k,v in next(r for r in d['providers'] if r['id']=='codex').items() if v})
 
  def codex_record(self,when,total):
   usage=lambda n:{'input_tokens':n-10,'cached_input_tokens':40,'output_tokens':10,'total_tokens':n}

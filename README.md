@@ -61,7 +61,7 @@ python3 scripts/install.py
 
 - **统计范围**默认显示当天。首次安装会在后台读取这台 Mac 已有的用量记录；选「全部」可以查看仍保存在本机的记录，不需要发起新调用。Claude 只统计桌面 App 已登记的会话，ChatGPT 包含本机 Codex 的活动和归档会话。已经删除、从未同步到本机或没有记录 Token 的对话无法补算。
 - **左键星星**打开主页。Summary 旁边依次是自动检测（放大镜图标）、分享和刷新按钮，鼠标停上去会显示名称；把鼠标停在一行上，会在旁边展开详情和操作。
-- **Magpie**：读取本机网关的 `usage.jsonl`（默认 `~/.config/magpie`，也支持 `XDG_CONFIG_HOME` 或手选目录），只统计网关最终有用量的请求，不读 Key，也不要求 Magpie 正在运行。同时勾选 Magpie 和经过它的 Harness（如 ChatGPT、Claude）时，经过 Magpie 的请求只按 Magpie 计入 Summary，Harness 卡片照常显示自己的记录并注明“N 次已由 Magpie 计入”；没经过 Magpie 的请求仍由 Harness 计入。OpenCodex 同理。费用是按已知价格的估算。
+- **Magpie**：读取本机网关的 `usage.jsonl`（默认 `~/.config/magpie`，也支持 `XDG_CONFIG_HOME` 或手选目录），只统计网关最终有用量的请求，不读 Key，也不要求 Magpie 正在运行。同时勾选 Magpie 和经过它的 Harness（如 ChatGPT、Claude）时，经过 Magpie 的请求只按 Magpie 计入 Summary，Harness 卡片照常显示自己的记录并注明“N 次已由 Magpie 计入”；没经过 Magpie 的请求仍由 Harness 计入。OpenCodex 同理。Magpie 卡片还会写出各客户端的占比（如“客户端 · ChatGPT 62% · Claude Code 30%”）；只想看网关总账时，主页只勾 Magpie 即可。费用是按已知价格的估算。
 - **DeepSeek Harness**：默认读取 `~/.dsh/sessions`。如果设置了 `DSH_HOME`，读取其 `sessions` 子目录；也可手选记录目录。通过 Magpie 调用 DeepSeek 模型的用量在 Magpie 卡片中查看。
 - **右键星星 → 主页模块…** 选择要显示的模块，并设置记录目录、Key 和连接。
 - **自动检测**（主页按钮或右键星星）按本机已安装的工具重新勾选模块，会先列出将启用和取消的模块，确认前不会改动任何设置。

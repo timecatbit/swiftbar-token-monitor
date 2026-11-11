@@ -1775,6 +1775,20 @@ def magpie_price(event):
     return sources.model_cost(event)
 
 
+# How Magpie's clients read on the card: the homepage's names where the plugin has a card for them.
+MAGPIE_CLIENT_NAMES = {'codex':'ChatGPT', 'claude':'Claude Code', 'claude-code':'Claude Code', 'claude-desktop':'Claude',
+                       'opencode':'OpenCode', 'dsh':'DeepSeek Harness', 'gemini':'Gemini CLI', 'gemini-cli':'Gemini CLI',
+                       'agy':'Antigravity', 'antigravity':'Antigravity', 'pi':'Pi', '':'未标注'}
+
+def client_rows(clients):
+    """A gateway's clients by their share of its tokens, largest first; one name per client."""
+    merged={}
+    for row in clients or []:
+        name=MAGPIE_CLIENT_NAMES.get(str(row.get('agent') or ''),str(row.get('agent')))
+        merged[name]=merged.get(name,0)+max(0.0,float(row.get('totalTokens') or 0))
+    total=sum(merged.values())
+    return [{'name':name,'tokens':tokens,'share':tokens/total} for name,tokens in sorted(merged.items(),key=lambda item:-item[1]) if tokens>0] if total else []
+
 # The clients Magpie names in its log whose own records the plugin reads as well. Its other clients
 # (pi, Antigravity, Cline…) are not read here, so their requests are counted from Magpie alone.
 MAGPIE_AGENTS = {'codex':('codex',), 'claude':('claude','claude-code','claude-desktop'), 'opencode':('opencode',),
@@ -2096,7 +2110,9 @@ def background_refresh(wait=False):
 
 
 # Index generations in use; older generations, removed snapshots and stray temp files are dropped.
-CURRENT_INDEXES = ('claude-app-usage-v3-', 'harness-v4-', 'harness-gemini-v2-', 'harness-gateway-v1-')
+CURRENT_INDEXES = ('claude-app-usage-v3-', 'harness-v4-', 'harness-v5-magpie-', 'harness-gemini-v2-', 'harness-gateway-v1-')
+# Indexes a source outgrew, under a prefix the current ones still match.
+RETIRED_INDEXES = ('harness-v4-magpie-',)
 INDEX_FILE = re.compile(r'(?:claude-app-usage|claude-usage|harness)-.+\.sqlite3(?:-journal|-wal|-shm)?')
 RETIRED_CACHES = ('startup.json', 'usage_today.json', 'usage_7d.json')
 
@@ -2111,7 +2127,7 @@ def collect_cache_garbage(now=None):
         name=entry.name
         try:age=now-entry.stat(follow_symlinks=False).st_mtime
         except OSError:continue
-        if ((INDEX_FILE.fullmatch(name) and not name.startswith(CURRENT_INDEXES)) or name in RETIRED_CACHES
+        if ((INDEX_FILE.fullmatch(name) and (not name.startswith(CURRENT_INDEXES) or name.startswith(RETIRED_INDEXES))) or name in RETIRED_CACHES
                 or (name.startswith('range_usage_') and (age>86400 or not name.endswith(current)))
                 or (name.startswith('configured-sources-') and age>86400)
                 or ((name.startswith('.cache-') or '.processing-' in name) and age>3600)):
@@ -3190,7 +3206,7 @@ def dashboard_payload(data):
         elif usage.get('refreshError'):status='刷新失败 · 保留原数据'
         elif usage.get('partial'):status='部分记录未读取'
         elif unpriced>=requests and requests and not credits:status='费用待定价'
-        return {'id':pid,'name':label,'subtitle':subtitle,'status':status,'available':available,'credits':credits or None,
+        return {'id':pid,'name':label,'subtitle':subtitle,'status':status,'available':available,'credits':credits or None,'clients':client_rows(usage.get('clients')) or None,
                 'cost':cost,'tokens':total,'requests':requests,'output':number(summary.get('outputTokens')),
                 'cache':min(1,cache/inputs) if inputs else None,'coverage':number(summary.get('coverageRatio')) if summary.get('coverageRatio') is not None else None,
                 'sessions':int(number(summary.get('sessions'))),'unpriced':unpriced,'models':model_rows,'history':history}

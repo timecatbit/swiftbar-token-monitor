@@ -240,7 +240,7 @@ def magpie_event(row, state):
     # The tier the upstream reported, else the one Magpie asked for: the local client prices by its request too.
     tier = row.get('tier_served') or row.get('tier_sent')
     # Offsets uniquely identify distinct requests even when a gateway reuses route IDs.
-    event.update(id=identity('magpie', state['offset']), timestamp=timestamp,
+    event.update(id=identity('magpie', state['offset']), timestamp=timestamp, agent=str(row.get('agent') or ''),
                  session=identity(row['session']) if row.get('session') else None,
                  write1h=min(event['writes'],number(row.get('cache_write_1h'))),
                  cacheKnown=not row.get('cache_unknown'),
@@ -311,13 +311,17 @@ def _stream(path):
     return process.stdout, process, timer
 
 
+# A source's index version rises when what its events hold changes, so old indexes are rebuilt.
+INDEX_VERSIONS = {'magpie': 5}
+
+
 def jsonl_usage(source, root, cache, start, end, zone, exclude_proxy=False, carriers=None, price=None):
     """carriers: gateways that may have logged the same requests, with what they logged (see aggregate);
     without OpenCodex's own log, the plugin can only tell its sessions by their provider name."""
     root = Path(root).expanduser()
     if not root.is_dir():
         return {'error': '未找到记录目录'}
-    db = Path(cache) / ('harness-v4-' + source + '-' + identity(str(root.resolve()))[:12] + '.sqlite3')
+    db = Path(cache) / ('harness-v' + str(INDEX_VERSIONS.get(source, 4)) + '-' + source + '-' + identity(str(root.resolve()))[:12] + '.sqlite3')
     db.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     conn = sqlite3.connect(db, timeout=10); os.chmod(db, 0o600)
     try:
@@ -527,13 +531,17 @@ def tally(events, zone, price=None):
     def empty():
         return dict(totalTokens=0, inputTokens=0, outputTokens=0, cachedInputTokens=0,
                     requests=0, estimatedCostUsd=0, unpricedRequests=0, credits=0)
-    summary = empty(); models = {}; days = {}; hours = {}; sessions = set(); first = None
+    summary = empty(); models = {}; days = {}; hours = {}; sessions = set(); first = None; clients = {}
     for event in events:
         ts = event['timestamp']
         i, o, r, w = [number(event.get(k)) for k in ('input', 'output', 'cached', 'writes')]
         credits = number(event.get('credits'))
         cost = event.get('cost')
         if cost is None and price: cost = price(event)
+        # A gateway names the client that sent each request (Magpie's agent).
+        if 'agent' in event:
+            client = clients.setdefault(event['agent'], {'totalTokens': 0, 'requests': 0})
+            client['totalTokens'] += i + o + r + w; client['requests'] += 1
         first = ts if first is None else min(first, ts)
         day = datetime.fromtimestamp(ts, zone).date().isoformat()
         if event.get('session') is not None:sessions.add(event['session'])
@@ -546,10 +554,12 @@ def tally(events, zone, price=None):
             else: target['estimatedCostUsd'] += cost
     summary['sessions'] = len(sessions)
     summary['coverageRatio'] = (summary['requests'] - summary['unpricedRequests']) / max(1, summary['requests'])
-    return {'summary': summary, 'models': [dict(v, model=k) for k,v in models.items()],
-            'days': [dict(v, date=k) for k,v in sorted(days.items())],
-            'hours': [dict(v, timestamp=k) for k,v in sorted(hours.items())],
-            'firstActivityAt': first}
+    result = {'summary': summary, 'models': [dict(v, model=k) for k,v in models.items()],
+              'days': [dict(v, date=k) for k,v in sorted(days.items())],
+              'hours': [dict(v, timestamp=k) for k,v in sorted(hours.items())],
+              'firstActivityAt': first}
+    if clients:result['clients'] = [dict(v, agent=k) for k,v in clients.items()]
+    return result
 
 
 def opencode_usage(root, start, end, zone, exclude_proxy=False, carriers=None):

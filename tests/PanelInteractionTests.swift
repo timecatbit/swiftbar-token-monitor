@@ -213,6 +213,12 @@ let crowded=DashboardView.legendLayout((1...8).map{"Very long harness name \($0)
 expect(crowded.allSatisfy{$0.count<=3} && crowded.flatMap{$0}.allSatisfy{$0.minX>=0 && $0.maxX<=320},"Wide labels stay inside the width")
 var legendData=grouped;legendData.providers=[("deepseek","DeepSeek Harness"),("codex","ChatGPT"),("claude","Claude App")].map{var p=grouped.providers[0];p.id=$0.0;p.name=$0.1;p.summaryIncluded=true;return p}
 expect(DashboardView.legendLabels(legendData)==["总量","DeepSeek","ChatGPT","Claude"],"Legend names drop suffixes the cards already show")
+var gateway=grouped.providers[0];gateway.available=true;gateway.clients=nil
+let plainHeight=DashboardView.sectionHeight(gateway)
+gateway.clients=[ModelUsage(name:"ChatGPT",tokens:60,share:0.6,credits:nil),ModelUsage(name:"Claude Code",tokens:40,share:0.4,credits:nil)]
+expect(DashboardView.clientLine(gateway)=="客户端 · ChatGPT 60% · Claude Code 40%" && DashboardView.sectionHeight(gateway)==plainHeight+16,"A gateway card adds one line naming its clients")
+gateway.available=false
+expect(DashboardView.clientLine(gateway)==nil,"A card without data names no clients")
 expect(!MenuLayout.aiming(from:NSPoint(x:330,y:480),to:NSPoint(x:332,y:479),flyout:openFlyout),"A tiny drift toward the flyout is not aiming")
 // The share picture is opaque, signed, and lists every source that has data.
 var shareSource=grouped;shareSource.providers[0].available=false

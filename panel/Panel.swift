@@ -15,7 +15,7 @@ struct CountedUsage:Decodable {var cost:Double?;var tokens:Double;var requests:I
 struct ProviderUsage:Decodable {
     var id:String;var name:String;var subtitle:String;var status:String;var available:Bool
     var cost:Double?;var credits:Double?;var tokens:Double;var requests:Int;var output:Double;var cache:Double?;var coverage:Double?
-    var sessions:Int;var unpriced:Int;var summaryIncluded:Bool?;var counted:CountedUsage?;var models:[ModelUsage];var history:[Double]
+    var sessions:Int;var unpriced:Int;var summaryIncluded:Bool?;var counted:CountedUsage?;var models:[ModelUsage];var clients:[ModelUsage]?;var history:[Double]
     // What Summary adds for this source: nothing when it isn't counted, and only the requests no gateway
     // logged when a gateway (OpenCodex, Magpie) counts the rest. The card itself keeps every record.
     var summaryPart:ProviderUsage? {
@@ -197,6 +197,17 @@ class ShareCard:FlippedView {
         frame=NSRect(x:0,y:0,width:Self.width,height:pictureHeight)
     }
     required init?(coder:NSCoder){fatalError()}
+    // A gateway's clients, wrapped onto as many lines as the picture needs rather than cut off.
+    static func clientLines(_ p:ProviderUsage,width:CGFloat,font:NSFont)->[String] {
+        guard DashboardView.clientLine(p) != nil,let clients=p.clients else{return []}
+        var lines:[String]=[],current="客户端"
+        for item in clients.map({$0.name+" "+share($0.share)}) {
+            let longer=current+" · "+item
+            if (longer as NSString).size(withAttributes:[.font:font]).width>width && current != "客户端" {lines.append(current);current=item}
+            else {current=longer}
+        }
+        return lines+[current]
+    }
     static func title(_ d:Dashboard)->String {
         ["today":"今日","24h":"近 24 小时","7d":"近 7 天","30d":"近 30 天","week":"本周","month":"本月","all":"累计"][d.rangeKey].map{$0+" AI 用量"} ?? d.rangeLabel+" AI 用量"
     }
@@ -242,7 +253,8 @@ class ShareCard:FlippedView {
 // The card style: an opaque card on a soft wash lit by the leading tools' colours.
 final class CardShareCard:ShareCard {
     static let margin:CGFloat=22,inset:CGFloat=24,chartHeight:CGFloat=150,modelHeight:CGFloat=24,legendRow:CGFloat=20
-    static func blockHeight(_ p:ProviderUsage)->CGFloat {92+CGFloat(max(1,p.models.count))*modelHeight}
+    static let clientWidth=width-margin*2-inset*2-32,clientFont=NSFont.systemFont(ofSize:10.5)
+    static func blockHeight(_ p:ProviderUsage)->CGFloat {92+CGFloat(clientLines(p,width:clientWidth,font:clientFont).count)*18+CGFloat(max(1,p.models.count))*modelHeight}
     private var cardHeight:CGFloat {
         let header:CGFloat=44,hero:CGFloat=88,tiles:CGFloat=88,chart=dashboard.dates.count>1 ? Self.chartHeight+22 : 0
         let share:CGFloat=shared.isEmpty ? 0 : 60+CGFloat((shared.count+2)/3)*Self.legendRow
@@ -424,6 +436,7 @@ final class CardShareCard:ShareCard {
             draw(tokenLine(p)+(part>0 ? " · 占 "+share(part/sum) : ""),NSRect(x:il,y:top+24,width:iw,height:16),font(11.5,.medium),.secondaryLabelColor)
             draw(DashboardView.stats(p),NSRect(x:il,y:top+42,width:iw,height:15),font(10.5,.regular),.secondaryLabelColor)
             var my=top+66
+            for line in Self.clientLines(p,width:Self.clientWidth,font:Self.clientFont){draw(line,NSRect(x:il,y:my-6,width:iw,height:15),Self.clientFont,.secondaryLabelColor);my+=18}
             if p.models.isEmpty{draw("此时段暂无模型调用",NSRect(x:il,y:my,width:iw,height:15),font(11,.regular),.secondaryLabelColor)}
             for m in p.models{
                 draw(modelName(m.name),NSRect(x:il,y:my,width:iw-140,height:16),font(11.5,.regular),.labelColor)
@@ -447,7 +460,8 @@ final class CardShareCard:ShareCard {
 // The terminal style: a terminal window on a dot grid.
 final class TerminalShareCard:ShareCard {
     static let margin:CGFloat=22,pad:CGFloat=22,titleBar:CGFloat=34,chartHeight:CGFloat=170,modelHeight:CGFloat=20,legendRow:CGFloat=18
-    static func blockHeight(_ p:ProviderUsage)->CGFloat {90+CGFloat(max(1,p.models.count))*modelHeight}
+    static let clientWidth=width-margin*2-pad*2-16,clientFont=NSFont.monospacedSystemFont(ofSize:10.5,weight:.regular)
+    static func blockHeight(_ p:ProviderUsage)->CGFloat {90+CGFloat(clientLines(p,width:clientWidth,font:clientFont).count)*17+CGFloat(max(1,p.models.count))*modelHeight}
     private var windowHeight:CGFloat {
         let chart=dashboard.dates.count>1 ? Self.chartHeight : 0
         let share:CGFloat=shared.isEmpty ? 0 : 56+CGFloat((shared.count+2)/3)*Self.legendRow
@@ -651,6 +665,7 @@ final class TerminalShareCard:ShareCard {
             draw(tokenLine(p)+(part>0 ? " · 占 "+share(part/sum) : ""),NSRect(x:left+16,y:top+40,width:width-16,height:15),mono(10.5,.medium),c.muted)
             draw(DashboardView.stats(p),NSRect(x:left+16,y:top+57,width:width-16,height:15),mono(10.5),c.comment)
             var my=top+80
+            for line in Self.clientLines(p,width:Self.clientWidth,font:Self.clientFont){draw(line,NSRect(x:left+16,y:my-6,width:width-16,height:15),Self.clientFont,c.comment);my+=17}
             if p.models.isEmpty{draw("此时段暂无模型调用",NSRect(x:left+16,y:my,width:width-16,height:15),mono(11),c.comment)}
             // Models hang off a drawn tree: one stem, a tick per model.
             if !p.models.isEmpty {
@@ -689,10 +704,16 @@ final class TerminalShareCard:ShareCard {
 final class DashboardView:FlippedView {
     var data:Dashboard;var toggleProvider:((String,Bool)->Void)?;private var hoveredProvider:String?
     private var summaryProviders:[ProviderUsage] {data.providers.compactMap{$0.summaryPart}}
-    static func sectionHeight(_ p:ProviderUsage)->CGFloat {78+CGFloat(max(1,p.models.count))*18}
+    static func sectionHeight(_ p:ProviderUsage)->CGFloat {78+clientHeight(p)+CGFloat(max(1,p.models.count))*18}
+    // A gateway's clients in one line, by their share of its tokens: "客户端 · ChatGPT 62% · Claude Code 30%".
+    static func clientLine(_ p:ProviderUsage)->String? {
+        guard p.available,let clients=p.clients,!clients.isEmpty else{return nil}
+        return "客户端 · "+clients.map{$0.name+" "+share($0.share)}.joined(separator:" · ")
+    }
+    static func clientHeight(_ p:ProviderUsage)->CGFloat {clientLine(p)==nil ? 0 : 16}
     static func providerHeight(_ p:ProviderUsage,_ d:Dashboard)->CGFloat {
         guard d.allowCollapse==true else{return sectionHeight(p)}
-        return (d.expandedProviders ?? []).contains(p.id) ? 74+CGFloat(max(1,p.models.count))*18 : 52
+        return (d.expandedProviders ?? []).contains(p.id) ? 74+clientHeight(p)+CGFloat(max(1,p.models.count))*18 : 52
     }
     // Legend names drop suffixes the cards below already show, so four fit on a row.
     static func legendLabels(_ d:Dashboard)->[String] {["总量"]+d.providers.compactMap{$0.summaryPart}.map(legendName)}
@@ -784,7 +805,8 @@ final class DashboardView:FlippedView {
         text(p.available ? tokenLine(p) : "—",x:left+120,y:y+27,w:width-120,size:12,weight:.medium,align:.right,numeric:true)
         if expanded {
             text(Self.stats(p),x:left+12,y:y+50,w:width-12,size:10,color:.secondaryLabelColor)
-            drawModels(p,y:y+70,left:left+12,right:right,color:c)
+            if let clients=Self.clientLine(p){text(clients,x:left+12,y:y+66,w:width-12,size:10,color:.secondaryLabelColor)}
+            drawModels(p,y:y+70+Self.clientHeight(p),left:left+12,right:right,color:c)
         }
     }
     private func drawProvider(_ p:ProviderUsage,y:CGFloat,left:CGFloat,right:CGFloat){
@@ -795,7 +817,8 @@ final class DashboardView:FlippedView {
         text(p.available ? headline(p) : "—",x:left,y:y+26,w:width*0.43,size:19,weight:.medium,numeric:true)
         text(p.available ? tokenLine(p) : "—",x:left+width*0.43,y:y+28,w:width*0.57,size:16,weight:.medium,align:.right,numeric:true)
         text(Self.stats(p),x:left,y:y+54,w:width,size:10,color:.secondaryLabelColor)
-        drawModels(p,y:y+74,left:left,right:right,color:c)
+        if let clients=Self.clientLine(p){text(clients,x:left,y:y+70,w:width,size:10,color:.secondaryLabelColor)}
+        drawModels(p,y:y+74+Self.clientHeight(p),left:left,right:right,color:c)
     }
     // Legend columns are justified: the first starts at the left edge, the last column's longest
     // label ends at the right edge, and column starts are evenly spaced. Four per row when they

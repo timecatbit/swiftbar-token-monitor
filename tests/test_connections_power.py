@@ -122,8 +122,8 @@ class PowerTests(unittest.TestCase):
     def test_cache_cleanup_drops_superseded_files_and_keeps_current_ones(self):
         cache=Path(self.m.CACHE_DIR);cache.mkdir(parents=True,exist_ok=True)
         current=self.m.range_cache_name();old=time.time()-2*86400
-        keep=['claude-app-usage-v3-abc.sqlite3','harness-v4-codex-abc.sqlite3','harness-gemini-v2-abc.sqlite3',current+'.json','range_usage_all_'+current.rsplit('_',1)[1]+'.json','quota.json','.cache-fresh','configured-sources-new.json']
-        drop=['claude-app-usage-v2-abc.sqlite3','claude-app-usage-v2-abc.sqlite3-journal','claude-usage-v3-abc.sqlite3','harness-codex-abc.sqlite3','harness-v2-codex-abc.sqlite3','harness-v3-codex-abc.sqlite3','harness-gemini-abc.sqlite3',
+        keep=['claude-app-usage-v3-abc.sqlite3','harness-v4-codex-abc.sqlite3','harness-v5-magpie-abc.sqlite3','harness-gemini-v2-abc.sqlite3',current+'.json','range_usage_all_'+current.rsplit('_',1)[1]+'.json','quota.json','.cache-fresh','configured-sources-new.json']
+        drop=['claude-app-usage-v2-abc.sqlite3','claude-app-usage-v2-abc.sqlite3-journal','claude-usage-v3-abc.sqlite3','harness-codex-abc.sqlite3','harness-v2-codex-abc.sqlite3','harness-v3-codex-abc.sqlite3','harness-v4-magpie-abc.sqlite3','harness-gemini-abc.sqlite3',
               'range_usage_today_000000000000.json','usage_7d.json','startup.json','.cache-old','panel-action.processing-42','configured-sources-old.json']
         for name in keep+drop:(cache/name).write_text('{}')
         for name in ('.cache-old','panel-action.processing-42','configured-sources-old.json'):os.utime(cache/name,(old,old))
