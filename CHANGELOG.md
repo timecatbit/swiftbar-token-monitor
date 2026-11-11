@@ -1,5 +1,12 @@
 # 更新记录
 
+## 5.16.2
+
+- 更新 Claude Code、Codex 时打开的终端标签只显示更新本身，结束后按回车关闭，不再出现 nvm 的“Now using node”等启动提示。
+- DeepSeek Harness 默认读取 ~/.dsh/sessions（也支持 DSH_HOME、DSH_SESSIONS_DIR），装了 dsh 就能直接看到用量，不用再手选目录。
+- Magpie 卡片新增客户端占比，如“客户端 · ChatGPT 62% · Claude Code 30%”，分享图里也会写全。
+- 只有 Claude Code 命令行会话时，Claude 卡片写明“只统计桌面 App，未找到会话”，不再只显示暂无用量。
+
 ## 5.16.1
 
 - 修复 Node 等终端启动提示占用菜单栏星星的问题。SwiftBar 直接启动插件，本地配置中的普通输出也不会进入菜单。
