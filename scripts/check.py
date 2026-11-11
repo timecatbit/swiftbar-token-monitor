@@ -38,7 +38,7 @@ def unused_code():
     return problems
 
 
-subprocess.run(['/bin/bash', '-n', str(ROOT / 'token-monitor.30s.sh')], check=True)
+subprocess.run(['/bin/bash', '-p', '-n', str(ROOT / 'token-monitor.30s.sh')], check=True)
 problems = unused_code()
 if problems:
     sys.exit('Unused code:\n' + '\n'.join(problems))

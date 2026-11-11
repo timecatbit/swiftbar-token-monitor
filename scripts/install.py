@@ -89,7 +89,7 @@ def main():
     if not (ROOT / 'build/OpenCodexPanel.app').is_dir():
         parser.error('The panel helper is missing; download the release zip again or build from source.')
     # Ask the shell entry point so OCX_PYTHON and its PATH match the running plugin.
-    python = subprocess.run(['/bin/bash',str(ROOT/ENTRY),'--python-path'],
+    python = subprocess.run(['/bin/bash','-p',str(ROOT/ENTRY),'--python-path'],
                             capture_output=True,text=True,check=True).stdout.strip()
     if not Path(python).is_file():parser.error('The plugin Python interpreter is unavailable.')
     transport = prepare_transport(ROOT,python)
@@ -145,7 +145,7 @@ def main():
         elif target.exists() or target.is_symlink(): target.unlink()
     try: (destination / 'assets').rmdir()
     except OSError: pass
-    detected = subprocess.run(['/bin/bash', str(destination / ENTRY), '--initialize-modules'],
+    detected = subprocess.run(['/bin/bash', '-p', str(destination / ENTRY), '--initialize-modules'],
                               capture_output=True, text=True, timeout=30)
     if detected.returncode:
         print('Module detection could not finish; choose modules from the right-click menu.')

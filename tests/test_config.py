@@ -45,5 +45,22 @@ class LocalConfigTests(unittest.TestCase):
             subprocess.run(['/bin/bash', str(plugin), '--refresh'], check=True, capture_output=True, env=dict(os.environ, OCX_STATE_DIR=str(config.parent)))
             self.assertEqual(observed.read_text(), 'https://komari.example.test')
 
+    def test_shell_startup_messages_cannot_become_a_menu_title_or_python_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            notice = 'Now using node v22.22.0 (npm v10.9.4)'
+            startup = root / 'bash-env'
+            startup.write_text('printf "%s\\n" ' + shlex.quote(notice) + '\n')
+            python = root / 'configured python'
+            python.write_text('#!/bin/sh\nprintf "%s\\n" " | sfimage=sparkles" "---" "Summary"\n')
+            python.chmod(0o755)
+            (root / 'config.local.sh').write_text(startup.read_text() + 'export OCX_PYTHON=' + shlex.quote(str(python)) + '\n')
+            env = dict(os.environ, OCX_STATE_DIR=str(root), BASH_ENV=str(startup))
+            self.assertIn(b'<swiftbar.runInBash>false</swiftbar.runInBash>', SOURCE.read_bytes())
+            output = subprocess.check_output([str(SOURCE)], env=env, text=True, timeout=5)
+            self.assertEqual(output.splitlines(), [' | sfimage=sparkles', '---', 'Summary'])
+            probe = subprocess.check_output(['/bin/bash', '-p', str(SOURCE), '--python-path'], env=env, text=True, timeout=5)
+            self.assertEqual(probe.splitlines(), [str(python)])
+
 if __name__ == '__main__':
     unittest.main()

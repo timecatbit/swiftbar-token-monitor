@@ -2124,7 +2124,7 @@ def schedule_background_refresh():
 
 def launch_background(mode):
     try:
-        subprocess.Popen(["/bin/bash", PLUGIN, mode], stdin=subprocess.DEVNULL,
+        subprocess.Popen(["/bin/bash", "-p", PLUGIN, mode], stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                          start_new_session=True, close_fds=True)
     except OSError:
@@ -3562,7 +3562,7 @@ def run_action(name, extra):
         if self_update_state().get('status')=='running':return 0
         if confirm('更新 Token Monitor 到 '+release['latest']+'？','当前版本 '+VERSION+'。将从 GitHub 下载该版本的安装包，校验 SHA-256 后安装；原文件先备份，设置、Key 和统计记录都会保留。',accept='更新'):
             set_self_update_state(status='running',version=release['latest'])
-            subprocess.Popen(['/bin/bash',PLUGIN,'--self-update',release['latest']],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
+            subprocess.Popen(['/bin/bash','-p',PLUGIN,'--self-update',release['latest']],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL,start_new_session=True,close_fds=True)
     elif name == "check-app-updates":
         invalidate_caches(["app_updates", "badge", "self_update"])

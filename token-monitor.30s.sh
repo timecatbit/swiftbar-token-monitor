@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -p
 # <xbar.title>token-monitor</xbar.title>
 # <xbar.version>5.16.0</xbar.version>
 # <xbar.author>minicoke</xbar.author>
@@ -6,6 +6,8 @@
 # <xbar.desc>可选 AI 客户端用量、账户资源与 Komari 监控，使用原生 macOS 面板。</xbar.desc>
 # <xbar.dependencies>python3</xbar.dependencies>
 # 星星打开原生数据面板；右键保留 SwiftBar 原菜单。
+# 直接执行脚本，登录 Shell 的启动提示会被 SwiftBar 当成菜单标题。
+# <swiftbar.runInBash>false</swiftbar.runInBash>
 # <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
 # <swiftbar.hideAbout>true</swiftbar.hideAbout>
 # <swiftbar.hideDisablePlugin>true</swiftbar.hideDisablePlugin>
@@ -26,11 +28,12 @@ case "$0" in
     /*) OCX_PLUGIN_PATH="$0" ;;
     *)  OCX_PLUGIN_PATH="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")" ;;
 esac
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin:$PATH"
 export PYTHONIOENCODING=utf-8
 export OCX_PLUGIN_PATH
 OCX_USER_CONFIG="${OCX_STATE_DIR:-$HOME/Library/Application Support/SwiftBarToken}/config.local.sh"
-if [ -f "$OCX_USER_CONFIG" ]; then source "$OCX_USER_CONFIG"; fi
+# 配置保留在当前 Shell 生效；配置打印的普通文字不属于 SwiftBar 菜单。
+if [ -f "$OCX_USER_CONFIG" ]; then source "$OCX_USER_CONFIG" >/dev/null; fi
 
 PYTHON_BIN="$OCX_PYTHON"
 if [ -z "$PYTHON_BIN" ]; then PYTHON_BIN=$(command -v python3); fi

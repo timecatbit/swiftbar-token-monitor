@@ -64,7 +64,7 @@ python3 scripts/install.py
 - **Magpie**：读取本机网关的 `usage.jsonl`（默认 `~/.config/magpie`，也支持 `XDG_CONFIG_HOME` 或手选目录），只统计网关最终有用量的请求，不读 Key，也不要求 Magpie 正在运行。同时勾选 Magpie 和经过它的 Harness（如 ChatGPT、Claude）时，经过 Magpie 的请求只按 Magpie 计入 Summary，Harness 卡片照常显示自己的记录并注明“N 次已由 Magpie 计入”；没经过 Magpie 的请求仍由 Harness 计入。OpenCodex 同理。费用是按已知价格的估算。
 - **右键星星 → 主页模块…** 选择要显示的模块，并设置记录目录、Key 和连接。
 - **自动检测**（主页按钮或右键星星）按本机已安装的工具重新勾选模块，会先列出将启用和取消的模块，确认前不会改动任何设置。
-- 不常用的设置写在 `~/Library/Application Support/SwiftBarToken/config.local.sh`，可用的变量见 [config.example.sh](config.example.sh)。
+- 不常用的设置写在 `~/Library/Application Support/SwiftBarToken/config.local.sh`，可用的变量见 [config.example.sh](config.example.sh)。如果命令行工具只在终端初始化时加入 PATH（例如通过 nvm 安装），可在这个文件里把对应的 `bin` 目录加进 PATH。
 
 ## 隐私
 
