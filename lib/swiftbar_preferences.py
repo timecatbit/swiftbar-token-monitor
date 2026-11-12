@@ -9,7 +9,7 @@ import swiftbar_files as files
 
 MODULES = (
     ('summary', 'Summary', '概览'),
-    ('calendar', '用量日历', '概览'),
+    ('heatmap', '用量热力图', '概览'),
     ('opencodex', 'OpenCodex', 'Harness'),
     ('magpie', 'Magpie', 'Harness'),
     ('claude', 'Claude', 'Harness'),
@@ -24,11 +24,11 @@ MODULES = (
     ('updates', 'Harness 更新', '其他'),
 )
 ALERT_LEVELS = (0, 70, 80, 90)  # Usage alert: 0 is off.
-DEFAULT_VISIBLE = ['summary', 'calendar', 'opencodex', 'claude', 'deepseek', 'chatgpt', 'komari', 'updates']
+DEFAULT_VISIBLE = ['summary', 'heatmap', 'opencodex', 'claude', 'deepseek', 'chatgpt', 'komari', 'updates']
 KNOWN = {row[0] for row in MODULES}
 # Modules added after release show once for people who keep Summary on; a saved file lists the modules
 # it already knew, so hiding one of these afterwards sticks.
-INTRODUCED = ('calendar',)
+INTRODUCED = ('heatmap',)
 USAGE = ('opencodex', 'magpie', 'claude', 'codex', 'opencode', 'deepseek-harness', 'workbuddy', 'qoder', 'gemini')
 
 

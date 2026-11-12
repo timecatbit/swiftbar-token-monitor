@@ -156,26 +156,56 @@ class RangeTests(unittest.TestCase):
   self.assertEqual([(r['name'],r['share']) for r in rows],[('ChatGPT',.6),('Claude Code',.3),('omp',.1)])
   self.assertNotIn('clients',{k for k,v in next(r for r in d['providers'] if r['id']=='codex').items() if v})
 
- def test_calendar_counts_each_day_as_summary_does(self):
-  self.assertEqual(datetime.fromtimestamp(self.m.range_bounds('calendar',self.now)[0],self.now.tzinfo).date().isoformat(),'2026-05-14')
-  self.m.preferences.write(self.m.STATE_DIR,dict(self.m.view_settings(),visible=['summary','calendar','magpie','codex']))
-  day=lambda date,tokens,requests=1,cost=0,unpriced=0:{'date':date,'totalTokens':tokens,'requests':requests,'estimatedCostUsd':cost,'unpricedRequests':unpriced}
-  mp={'summary':{'requests':2,'totalTokens':300},'days':[day('2026-11-04',200,cost=1.5),day('2026-05-13',999)]}
-  # ChatGPT's card has 500 tokens on Nov 3, but Magpie carried 400 of them; Summary counts those once, from Magpie.
-  codex={'summary':{'requests':3,'totalTokens':600},'carried':{'Magpie':1},'days':[day('2026-11-03',500,2),day('2026-11-04',100)],
-         'counted':{'summary':{'requests':2,'totalTokens':200},'days':[day('2026-11-03',100,1,unpriced=1),day('2026-11-04',100)]}}
+ def test_heatmap_squares_follow_the_selected_range(self):
+  self.m.preferences.write(self.m.STATE_DIR,dict(self.m.view_settings(),visible=['summary','heatmap','magpie','codex']))
+  hour=lambda h:int(datetime(2026,11,4,h,tzinfo=self.now.tzinfo).timestamp())
+  row=lambda **kw:dict({'totalTokens':0,'requests':1,'estimatedCostUsd':0,'unpricedRequests':0},**kw)
+  mp={'summary':{'requests':2,'totalTokens':600},'hours':[row(timestamp=hour(10),totalTokens=400,estimatedCostUsd=1.5),row(timestamp=hour(9),totalTokens=200)],
+      'days':[row(date='2026-11-04',totalTokens=600),row(date='2026-05-01',totalTokens=999)]}
+  # ChatGPT logged 500 tokens at 10:00 but Magpie carried 400 of them; Summary counts those once, from Magpie.
+  codex={'summary':{'requests':3,'totalTokens':600},'carried':{'Magpie':1},'hours':[row(timestamp=hour(10),totalTokens=500,requests=2)],
+         'counted':{'summary':{'requests':2,'totalTokens':200},'hours':[row(timestamp=hour(10),totalTokens=100,unpricedRequests=1),row(timestamp=hour(11),totalTokens=100)],
+                    'days':[row(date='2026-11-03',totalTokens=100),row(date='2026-11-04',totalTokens=100)]}}
+  def heat(key,**sources):
+   with patch.object(self.m,'usage_now',return_value=self.now):
+    return self.m.dashboard_payload({'displayed_range':key,'range_usage':dict({'range':key,'magpie':mp,'codex':codex},**sources)})['heatmap']
+  # Today: a row of hours, the ones after now still to come.
+  h=heat('today')
+  self.assertEqual((h['columns'],len(h['tokens']),h['future'],h['hint']),(24,24,11,'每格 1 小时'))
+  self.assertEqual(h['tokens'][9:12],[200,500,100]);self.assertEqual((h['requests'][10],h['costs'][10],h['unpriced'][10]),(2,1.5,1))
+  self.assertEqual(h['labels'][0],'11月4日 周三 00:00');self.assertEqual(h['figures'],'活跃 3 小时 · 连续 3 小时 · 最长 3 小时')
+  h=heat('24h');self.assertEqual((h['labels'][0],h['labels'][-1],h['future']),('11月3日 周二 13:00','11月4日 周三 12:00',0))
+  # A week: a row of hours per day.
+  h=heat('7d');self.assertEqual((h['columns'],len(h['tokens']),h['future'],h['labels'][0],h['hint']),(24,168,11,'10月29日 周四 00:00','每行 1 天 · 每格 1 小时'))
+  self.assertEqual(h['tokens'][6*24+10],500)
+  h=heat('week');self.assertEqual((len(h['tokens']),h['future'],h['labels'][0],h['tokens'][2*24+10]),(168,107,'11月2日 周一 00:00',500))
+  # Thirty days and this month: a row of days.
+  h=heat('30d');self.assertEqual((h['columns'],len(h['tokens']),h['labels'][0],h['tokens'][-2:],h['hint']),(30,30,'10月6日 周二',[100,700],'每格 1 天'))
+  h=heat('month');self.assertEqual((h['columns'],len(h['tokens']),h['future'],h['labels'][0]),(30,30,26,'11月1日 周日'))
+  # 全部: rows of 35 days back to the first day used within the last 175.
+  h=heat('all');self.assertEqual((h['columns'],len(h['tokens']),h['labels'][0],h['labels'][-1]),(35,35,'10月1日 周四','11月4日 周三'))
+  self.assertEqual(sum(h['tokens']),800)
+  # A source whose hours couldn't be read leaves the squares short, and says so.
+  self.m.preferences.write(self.m.STATE_DIR,dict(self.m.view_settings(),visible=['summary','heatmap','magpie','codex','claude']))
+  self.assertEqual(heat('7d',claude={'summary':{'requests':1,'totalTokens':10}})['hint'],'每行 1 天 · 每格 1 小时 · 部分小时数据不可用')
   with patch.object(self.m,'usage_now',return_value=self.now):
-   c=self.m.dashboard_payload({'range_usage':{},'calendar_usage':{'range':'calendar','magpie':mp,'codex':codex}})['calendar']
-  self.assertEqual((c['start'],len(c['tokens']),c['status']),('2026-05-14',175,''))
-  self.assertEqual(c['tokens'][-2:],[100,300]);self.assertEqual(c['requests'][-2:],[1,2])
-  self.assertEqual(c['costs'][-1],1.5);self.assertEqual(c['unpriced'][-2:],[1,0])
-  self.assertEqual(sum(c['tokens']),400)  # The day before the 175 is outside.
-  with patch.object(self.m,'usage_now',return_value=self.now):
-   self.assertEqual(self.m.dashboard_payload({})['calendar']['status'],'待同步')
-   self.assertIn('calendar',self.m.usage_ranges_due())
-   # Hidden, it is neither sent nor read.
+   self.assertEqual(self.m.dashboard_payload({'displayed_range':'today'})['heatmap']['status'],'待同步')
    self.m.preferences.write(self.m.STATE_DIR,dict(self.m.view_settings(),visible=['summary','magpie']))
-   self.assertIsNone(self.m.dashboard_payload({})['calendar']);self.assertNotIn('calendar',self.m.usage_ranges_due())
+   self.assertIsNone(self.m.dashboard_payload({})['heatmap'])
+
+ def test_claude_and_opencodex_keep_a_week_of_hours(self):
+  self.write('a.jsonl',[self.row('monday','2026-11-02T01:00:00Z'),self.row('today')])
+  self.assertEqual(len(self.m.claude_usage_records(self.root,self.db,self.now,'7d')[0]['hours']),2)
+  self.assertEqual(self.m.claude_usage_records(self.root,self.db,self.now,'30d')[0]['hours'],[])
+  start,end=self.m.range_bounds('7d',self.now)
+  timeline={'start':int(start),'bucketSeconds':3600,'series':[{'points':[5,0,7]}]}
+  with patch.object(self.m,'usage_window',return_value={'summary':{'requests':2,'totalTokens':12}}),patch.object(self.m,'request',return_value=(timeline,None)) as read:
+   p=self.m.ocx_range_usage('7d',self.now)
+  self.assertIn('hours=168',read.call_args.args[0]);self.assertEqual([h['totalTokens'] for h in p['hours']],[5,0,7]);self.assertNotIn('chartUnavailable',p)
+  # A failed timeline only leaves the heatmap short; the day chart is unaffected.
+  with patch.object(self.m,'usage_window',return_value={'summary':{}}),patch.object(self.m,'request',return_value=(None,(500,'x',None))):
+   p=self.m.ocx_range_usage('week',self.now)
+  self.assertNotIn('hours',p);self.assertNotIn('chartUnavailable',p)
 
  def codex_record(self,when,total):
   usage=lambda n:{'input_tokens':n-10,'cached_input_tokens':40,'output_tokens':10,'total_tokens':n}

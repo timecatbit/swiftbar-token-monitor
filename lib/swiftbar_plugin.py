@@ -29,6 +29,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+import calendar
 import urllib.error
 import urllib.request
 import urllib.parse
@@ -944,7 +945,7 @@ def claude_usage_records(root, db_path=None, now=None, range_key="today", files=
             first_activity=stamp if first_activity is None else min(first_activity,stamp)
             day=datetime.fromtimestamp(stamp,zone).date().isoformat();sessions.add(row['session'])
             targets=[summary,models.setdefault(model,empty()),days.setdefault(day,empty())]
-            if range_key in ('today','24h'):targets.append(hours.setdefault(int(stamp//3600)*3600,empty()))
+            if range_key in HOURLY_RANGES:targets.append(hours.setdefault(int(stamp//3600)*3600,empty()))
             for target in targets:
                 target['totalTokens']+=i+o+w5+w1+r;target['inputTokens']+=i+w5+w1+r
                 target['outputTokens']+=o;target['cacheReadInputTokens']+=r;target['cacheCreationInputTokens']+=w5+w1;target['requests']+=1
@@ -1709,8 +1710,8 @@ def qoder_subscription_lines(data):
 
 
 RANGES={'today':'当天','24h':'近 24 小时','7d':'近 7 天','30d':'近 30 天','week':'本周','month':'本月','all':'全部'}
-# The usage calendar reads the last 175 days: five rows of five weeks.
-CALENDAR_DAYS=175
+# For 全部, the heatmap shows up to the last 175 days: five rows of five weeks.
+HEATMAP_DAYS=175
 
 def usage_now():
     from zoneinfo import ZoneInfo
@@ -1724,7 +1725,7 @@ def range_bounds(key,now=None):
     now=now or usage_now();day=now.replace(hour=0,minute=0,second=0,microsecond=0)
     start={'today':day,'24h':now-timedelta(hours=24),'7d':day-timedelta(days=6),
            '30d':day-timedelta(days=29),'week':day-timedelta(days=day.weekday()),
-           'month':day.replace(day=1),'calendar':day-timedelta(days=CALENDAR_DAYS-1),'all':None}[key]
+           'month':day.replace(day=1),'all':None}[key]
     return (start.timestamp() if start else 0),now.timestamp()
 
 def range_options(key=None):
@@ -1762,6 +1763,16 @@ def ocx_range_usage(key,now):
         if key=='today' and any(buckets.values()):
             payload['firstActivityAt']=min(activity) if activity else max(start,int(end//60)*60)
         payload['chartIncomplete']=bool(timeline.get('missingMeasurements'))
+    elif key in HOURLY_RANGES:
+        # The chart goes by day here; these hours only fill the heatmap, so a failed read leaves just that short.
+        timeline,error=request('/api/usage/timeline?hours=168&bucketMinutes=60&metric=total&aggregation=sum',timeout=12)
+        if not error and isinstance(timeline,dict) and not timeline.get('truncated'):
+            buckets={}
+            for series in timeline.get('series',[]):
+                for i,value in enumerate(series.get('points',[])):
+                    stamp=timeline['start']+i*timeline['bucketSeconds']
+                    if start<=stamp<=end:buckets[int(stamp//3600)*3600]=buckets.get(int(stamp//3600)*3600,0)+float(value or 0)
+            payload['hours']=[{'timestamp':stamp,'totalTokens':value} for stamp,value in sorted(buckets.items())]
     return payload
 
 def magpie_price(event):
@@ -2074,9 +2085,9 @@ def check_usage_alerts():
 
 
 def usage_ranges_due():
-    """The selected range, and the calendar when it is shown, whose figures are due."""
-    keys=[selected_range()]+(['calendar'] if module_enabled('calendar') else [])
-    return [key for key in keys if cache_due(read_cache(range_cache_name(key)),refresh_ttl(60))]
+    """The selected range, when its figures are due; the heatmap is drawn from the same figures."""
+    key=selected_range()
+    return [key] if cache_due(read_cache(range_cache_name(key)),refresh_ttl(60)) else []
 
 
 def refresh_usage_range(wait=False):
@@ -2175,8 +2186,6 @@ def cached_data():
         data[name],data[name+'_error']=cache_result(read_cache(name),ttl_for(name))
     if not chatgpt_configured():data['chatgpt']={'state':'未找到 ChatGPT 客户端登录'};data['chatgpt_error']=None
     data["range_usage"],data["range_usage_error"]=cache_result(read_cache(range_cache_name()),refresh_ttl(60))
-    if module_enabled('calendar'):
-        data['calendar_usage'],data['calendar_usage_error']=cache_result(read_cache(range_cache_name('calendar')),refresh_ttl(60))
     # A new time range and its totals appear together; keep the previous range
     # visible until then, provided it belongs to the same sources and settings.
     if not data['range_usage'] and not refresh_failed(data['range_usage_error']):
@@ -3182,22 +3191,66 @@ def summary_usage(selected):
     return result
 
 
-def calendar_payload(data, now):
-    """Each day of the calendar's weeks up to today, as Summary counts it."""
-    bundle=data.get('calendar_usage') or {}
-    if bundle.get('range')!='calendar':bundle={}
-    first=datetime.fromtimestamp(range_bounds('calendar',now)[0],now.tzinfo).date();count=(now.date()-first).days+1
-    tokens=[0.0]*count;requests=[0]*count;costs=[0.0]*count;unpriced=[0]*count
-    selected=[(k,label,bundle.get(k) or {}) for k,label,category in preferences.MODULES if k in preferences.USAGE and module_enabled(k)]
+# Ranges whose heatmap goes by the hour; the rest go by the day.
+HOURLY_RANGES=('today','24h','7d','week')
+WEEKDAYS='一二三四五六日'
+
+def heatmap_cells(key, now, used):
+    """The heatmap's squares for a range, in reading order, as (key into the figures, label, still to come).
+    Today and 24 hours are a row of hours, 7 days and this week a row of hours per day, 30 days and this
+    month a row of days, and 全部 rows of 35 days, as many as reach back to the first day used."""
+    zone=now.tzinfo;day=now.replace(hour=0,minute=0,second=0,microsecond=0)
+    def name(d):return '%d月%d日 周%s'%(d.month,d.day,WEEKDAYS[d.weekday()])
+    if key in HOURLY_RANGES:
+        if key=='24h':
+            base=int(now.timestamp())//3600*3600-23*3600
+            moments=[datetime.fromtimestamp(base+3600*i,zone) for i in range(24)]
+        else:
+            first=day-timedelta(days={'today':0,'7d':6,'week':day.weekday()}[key])
+            # Each row is one local day of wall-clock hours.
+            moments=[(first+timedelta(days=d)).replace(hour=h) for d in range(1 if key=='today' else 7) for h in range(24)]
+        return [(int(m.timestamp())//3600*3600,name(m)+' %02d:00'%m.hour,m>now) for m in moments],24
+    if key=='30d':first,count=day-timedelta(days=29),30
+    elif key=='month':first,count=day.replace(day=1),calendar.monthrange(day.year,day.month)[1]
+    else:
+        start=day-timedelta(days=HEATMAP_DAYS-1)
+        since=[d for d in used if d>=start.date().isoformat()]
+        span=(day.date()-datetime.strptime(min(since),'%Y-%m-%d').date()).days+1 if since else 1
+        count=min(HEATMAP_DAYS,-(-span//35)*35);first=day-timedelta(days=count-1)
+    dates=[(first+timedelta(days=i)).date() for i in range(count)]
+    return [(d.isoformat(),name(d),d>day.date()) for d in dates],(35 if key=='all' else count)
+
+
+def heatmap_payload(bundle, key, now, selected, error=None):
+    """The squares under Summary for the selected range, counted as Summary counts them."""
+    hourly=key in HOURLY_RANGES;totals={};partial=False
     for part in summary_usage(selected).values():
-        for day in (part['usage'] or {}).get('days') or []:
-            try:index=(datetime.strptime(str(day.get('date',''))[:10],'%Y-%m-%d').date()-first).days
-            except ValueError:continue
-            if not 0<=index<count:continue
-            tokens[index]+=max(0.0,float(day.get('totalTokens') or 0));requests[index]+=int(day.get('requests') or 0)
-            costs[index]+=max(0.0,float(day.get('estimatedCostUsd') or 0));unpriced[index]+=int(day.get('unpricedRequests') or 0)
-    status='' if bundle else ('数据暂不可用' if refresh_failed(data.get('calendar_usage_error')) else '待同步')
-    return {'start':first.isoformat(),'tokens':tokens,'requests':requests,'costs':[round(c,6) for c in costs],'unpriced':unpriced,'status':status}
+        usage=part['usage'] or {}
+        rows=usage.get('hours' if hourly else 'days') or []
+        # A source whose hours couldn't be read (OpenCodex's timeline) leaves the squares short.
+        if hourly and not rows and (usage.get('summary') or {}).get('requests'):partial=True
+        for row in rows:
+            slot=int(row.get('timestamp') or 0)//3600*3600 if hourly else str(row.get('date',''))[:10]
+            t=totals.setdefault(slot,[0.0,0,0.0,0])
+            t[0]+=max(0.0,float(row.get('totalTokens') or 0));t[1]+=int(row.get('requests') or 0)
+            t[2]+=max(0.0,float(row.get('estimatedCostUsd') or 0));t[3]+=int(row.get('unpricedRequests') or 0)
+    used=[slot for slot,t in totals.items() if t[0]>0 or t[1]>0] if not hourly else []
+    cells,columns=heatmap_cells(key,now,used)
+    values=[totals.get(slot,[0.0,0,0.0,0]) for slot,_,_ in cells]
+    future=sum(1 for _,_,later in cells if later)
+    # Active squares, the run up to now (or up to the square before, until it is used) and the longest run.
+    shown=[t[0]>0 or t[1]>0 for t in values[:len(values)-future]];run=longest=0
+    for flag in shown:run=run+1 if flag else 0;longest=max(longest,run)
+    current=0;index=len(shown)-1
+    if index>=0 and not shown[index]:index-=1
+    while index>=0 and shown[index]:current+=1;index-=1
+    unit='小时' if hourly else '天'
+    hint={True:'每格 1 小时',False:'每格 1 天'}[hourly] if key not in ('7d','week') else '每行 1 天 · 每格 1 小时'
+    status='' if bundle else ('数据暂不可用' if refresh_failed(error) else '待同步')
+    return {'columns':columns,'labels':[label for _,label,_ in cells],'tokens':[t[0] for t in values],'requests':[t[1] for t in values],
+            'costs':[round(t[2],6) for t in values],'unpriced':[t[3] for t in values],'future':future,'status':status,
+            'figures':'活跃 %d %s · 连续 %d %s · 最长 %d %s'%(sum(shown),unit,current,unit,longest,unit),
+            'hint':hint+(' · 部分小时数据不可用' if partial else '')}
 
 
 def dashboard_payload(data):
@@ -3322,7 +3375,7 @@ def dashboard_payload(data):
         updated='更新时间：'+read.strftime('%H:%M' if read.date()==now.date() else '%m/%d %H:%M')
     return {'date':now.date().isoformat(),'dates':labels,'providers':providers,'rangeKey':key,'rangeLabel':RANGES[key],
             'chartUnit':unit,'chartSpan':span,'period':period,'chartStatus':chart_status,'updated':updated,'chartPositions':chart_positions,
-            'calendar':calendar_payload(data,now) if module_enabled('calendar') and selected else None,
+            'heatmap':heatmap_payload(bundle,key,now,selected,data.get('range_usage_error')) if module_enabled('heatmap') and selected else None,
             'showSummary':module_enabled('summary'),'allowCollapse':view_settings()['allowCollapse'],'expandedProviders':view_settings()['expandedProviders']}
 
 
@@ -3615,7 +3668,7 @@ def run_action(name, extra):
         if cache_due(read_cache(range_cache_name(key)),refresh_ttl(60)):
             launch_background('--refresh-range')
     elif name == "refresh":
-        invalidate_caches([range_cache_name(),range_cache_name('calendar')] + list(EXTERNAL_TTLS) + list(named_key_loaders()))
+        invalidate_caches([range_cache_name()] + list(EXTERNAL_TTLS) + list(named_key_loaders()))
         schedule_background_refresh()
     elif name == "update-self":
         release=plugin_update({'self_update':read_cache('self_update').get('payload') or {}})

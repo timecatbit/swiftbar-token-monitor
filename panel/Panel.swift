@@ -25,14 +25,16 @@ struct ProviderUsage:Decodable {
         return part
     }
 }
-// Each day of the last 175 up to today, as Summary counts it.
-struct UsageCalendar:Decodable {
-    var start:String;var tokens:[Double];var requests:[Int];var costs:[Double];var unpriced:[Int];var status:String?
-    // Rows of five weeks, at most five of them: the 175 days read.
-    static let columns=35,maxRows=5
+// The squares under Summary for the selected range, as Summary counts them, in reading order: a row of hours for
+// a day, a row of hours per day for a week, and days otherwise. The last `future` squares are still to come.
+struct UsageHeatmap:Decodable {
+    var columns:Int;var labels:[String];var tokens:[Double];var requests:[Int];var costs:[Double];var unpriced:[Int]
+    var future:Int;var figures:String;var hint:String;var status:String?
+    var rows:Int {max(1,(tokens.count+max(1,columns)-1)/max(1,columns))}
+    var past:Int {max(0,tokens.count-future)}
     var active:[Bool] {tokens.indices.map{tokens[$0]>0 || (requests.indices.contains($0) && requests[$0]>0)}}
-    // Four shades by rank among the days with tokens, so a few heavy days don't wash out the rest and the
-    // busiest day is always the darkest. Days with requests but no tokens (Qoder CN Credits) take the lightest.
+    // Four shades by rank among the squares with tokens, so a few heavy ones don't wash out the rest and the
+    // busiest is always the darkest. Squares with requests but no tokens (Qoder CN Credits) take the lightest.
     var levels:[Int] {
         let values=tokens.filter{$0>0}.sorted(),flags=active
         return tokens.indices.map{i in
@@ -43,47 +45,25 @@ struct UsageCalendar:Decodable {
             return max(1,min(4,Int(ceil(4*Double(low)/Double(values.count)))))
         }
     }
-    // Active days, the run that ends today (or yesterday, before today's first request) and the longest run.
-    var streaks:(active:Int,current:Int,longest:Int) {
-        let flags=active;var longest=0,run=0
-        for flag in flags {run=flag ? run+1 : 0;longest=max(longest,run)}
-        var current=0,index=flags.count-1
-        if index>=0 && !flags[index]{index-=1}
-        while index>=0 && flags[index]{current+=1;index-=1}
-        return (flags.filter{$0}.count,current,longest)
-    }
-    // Enough rows to reach back to the first day with any use, so a short history is a short block.
-    var rows:Int {
-        let used=active.firstIndex(of:true) ?? tokens.count-1
-        return min(Self.maxRows,max(1,(tokens.count-used+Self.columns-1)/Self.columns))
-    }
-    // The day in a cell, read left to right and top to bottom, with today in the bottom-right corner.
-    // Cells before the days read come out negative.
-    func index(row:Int,column:Int)->Int {tokens.count-(rows-row)*Self.columns+column}
-    static let calendar:Calendar={var c=Calendar(identifier:.gregorian);c.timeZone=TimeZone(identifier:"UTC")!;return c}()
-    var firstDay:Date? {let f=DateFormatter();f.calendar=Self.calendar;f.timeZone=Self.calendar.timeZone;f.dateFormat="yyyy-MM-dd";return f.date(from:start)}
-    func day(_ index:Int)->Date? {firstDay.flatMap{Self.calendar.date(byAdding:.day,value:index,to:$0)}}
-    // The day pointed at, in one line: its date, tokens, known cost and requests.
+    // The square pointed at, in one line: when, tokens, known cost and requests.
     func detail(_ index:Int)->String {
-        guard let date=day(index) else{return ""}
-        let f=DateFormatter();f.calendar=Self.calendar;f.timeZone=Self.calendar.timeZone;f.locale=Locale(identifier:"zh_CN");f.dateFormat="M月d日 EEE"
-        let label=f.string(from:date),n=requests.indices.contains(index) ? requests[index] : 0
-        guard tokens.indices.contains(index),active[index] else{return label+" · 无用量"}
-        var parts=[label]
+        guard labels.indices.contains(index) else{return ""}
+        let n=requests.indices.contains(index) ? requests[index] : 0
+        guard tokens.indices.contains(index),active[index] else{return labels[index]+" · 无用量"}
+        var parts=[labels[index]]
         if tokens[index]>0 {parts.append(tokenText(tokens[index])+" Token")}
         let cost=costs.indices.contains(index) ? costs[index] : 0,partial=unpriced.indices.contains(index) && unpriced[index]>0
         if cost>0 {parts.append((partial ? "已知 " : "")+money(cost))}
         parts.append("\(n) 请求")
         return parts.joined(separator:" · ")
     }
-    // The second line of the bubble: why there's nothing yet, or the active days and runs.
+    // The bubble's second line: why there's nothing yet, or else the figures.
     var note:String? {
         if let status,!status.isEmpty {return status}
         return active.contains(true) ? nil : "暂无用量"
     }
-    var figures:String {let s=streaks;return "活跃 \(s.active) 天 · 连续 \(s.current) 天 · 最长 \(s.longest) 天"}
 }
-struct Dashboard:Decodable {var date:String;var dates:[String];var providers:[ProviderUsage];var rangeKey:String;var rangeLabel:String;var chartUnit:String;var chartSpan:String;var period:[String]?;var chartStatus:String;var updated:String?;var chartPositions:[Double]?;var calendar:UsageCalendar?;var showSummary:Bool?;var allowCollapse:Bool?;var expandedProviders:[String]?}
+struct Dashboard:Decodable {var date:String;var dates:[String];var providers:[ProviderUsage];var rangeKey:String;var rangeLabel:String;var chartUnit:String;var chartSpan:String;var period:[String]?;var chartStatus:String;var updated:String?;var chartPositions:[Double]?;var heatmap:UsageHeatmap?;var showSummary:Bool?;var allowCollapse:Bool?;var expandedProviders:[String]?}
 struct Project:Decodable {var name:String;var url:String}
 struct Snapshot:Decodable {var project:Project?;var dashboard:Dashboard?;var entries:[Entry];var rangeOptions:[Entry]?;var updateCount:Int?;var moduleOptions:[Entry]?;var appearance:String?;var preferences:PresentationPreferences?}
 func dark(_ view:NSView)->Bool {view.effectiveAppearance.bestMatch(from:[.darkAqua,.aqua]) == .darkAqua}
@@ -245,18 +225,19 @@ class ShareCard:FlippedView {
     var counted:[ProviderUsage] {rows.compactMap{$0.summaryPart}}
     var shared:[ProviderUsage] {counted.filter{$0.tokens>0}}
     var pictureHeight:CGFloat {0}
-    // The calendar as the panel shows it, once it has been read and something has been used.
-    var calendar:UsageCalendar? {dashboard.calendar.flatMap{($0.status ?? "").isEmpty && $0.active.contains(true) ? $0 : nil}}
-    static func calendarPitch(width:CGFloat)->CGFloat {(width+DashboardView.calendarGap)/CGFloat(UsageCalendar.columns)}
-    static func calendarGridHeight(_ c:UsageCalendar,width:CGFloat)->CGFloat {CGFloat(c.rows)*calendarPitch(width:width)-DashboardView.calendarGap}
-    func drawCalendar(_ c:UsageCalendar,x:CGFloat,y:CGFloat,width:CGFloat,shades:[NSColor]){
-        let pitch=Self.calendarPitch(width:width),cell=pitch-DashboardView.calendarGap,levels=c.levels
-        for row in 0..<c.rows {
-            for column in 0..<UsageCalendar.columns {
-                let index=c.index(row:row,column:column)
-                shades[index<0 ? 0 : levels[index]].setFill()
-                NSBezierPath(roundedRect:NSRect(x:x+CGFloat(column)*pitch,y:y+CGFloat(row)*pitch,width:cell,height:cell),xRadius:1.8,yRadius:1.8).fill()
+    // The heatmap as the panel shows it, once it has been read and something has been used.
+    var heatmap:UsageHeatmap? {dashboard.heatmap.flatMap{($0.status ?? "").isEmpty && $0.active.contains(true) ? $0 : nil}}
+    static func heatmapPitch(_ h:UsageHeatmap,width:CGFloat)->CGFloat {(width+DashboardView.heatmapGap)/CGFloat(max(1,h.columns))}
+    static func heatmapGridHeight(_ h:UsageHeatmap,width:CGFloat)->CGFloat {CGFloat(h.rows)*heatmapPitch(h,width:width)-DashboardView.heatmapGap}
+    func drawHeatmap(_ h:UsageHeatmap,x:CGFloat,y:CGFloat,width:CGFloat,shades:[NSColor]){
+        let pitch=Self.heatmapPitch(h,width:width),cell=pitch-DashboardView.heatmapGap,levels=h.levels,radius=min(2.4,cell*0.2)
+        for index in 0..<min(h.tokens.count,h.rows*h.columns) {
+            let rect=NSRect(x:x+CGFloat(index%h.columns)*pitch,y:y+CGFloat(index/h.columns)*pitch,width:cell,height:cell)
+            if index>=h.past {
+                let outline=NSBezierPath(roundedRect:rect.insetBy(dx:0.4,dy:0.4),xRadius:radius,yRadius:radius);outline.lineWidth=0.8
+                shades[0].setStroke();outline.stroke();continue
             }
+            shades[levels[index]].setFill();NSBezierPath(roundedRect:rect,xRadius:radius,yRadius:radius).fill()
         }
     }
     static func make(_ style:Style,_ dashboard:Dashboard,project:Project)->ShareCard {
@@ -333,11 +314,11 @@ final class CardShareCard:ShareCard {
         let header:CGFloat=44,hero:CGFloat=88,tiles:CGFloat=88,chart=dashboard.dates.count>1 ? Self.chartHeight+22 : 0
         let share:CGFloat=shared.isEmpty ? 0 : 60+CGFloat((shared.count+2)/3)*Self.legendRow
         let blocks=rows.isEmpty ? 0 : rows.reduce(0){$0+Self.blockHeight($1)+10}-10
-        return Self.inset*2+header+hero+tiles+chart+calendarHeight+share+blocks
+        return Self.inset*2+header+hero+tiles+chart+heatmapHeight+share+blocks
     }
     override var pictureHeight:CGFloat {Self.margin*2+cardHeight+60}
-    private static let calendarWidth=width-margin*2-inset*2
-    private var calendarHeight:CGFloat {calendar.map{24+Self.calendarGridHeight($0,width:Self.calendarWidth)+24} ?? 0}
+    private static let heatmapWidth=width-margin*2-inset*2
+    private var heatmapHeight:CGFloat {heatmap.map{24+Self.heatmapGridHeight($0,width:Self.heatmapWidth)+24} ?? 0}
     static func day(_ iso:String)->String {
         let parts=iso.split(separator:"-").compactMap{Int($0)}
         return parts.count==3 ? "\(parts[0]) 年 \(parts[1]) 月 \(parts[2]) 日" : iso
@@ -464,11 +445,12 @@ final class CardShareCard:ShareCard {
             }
             y+=Self.chartHeight+22
         }
-        // The usage calendar under its heading.
-        if let calendar {
-            draw("用量日历",NSRect(x:left,y:y,width:width,height:15),font(11,.semibold),.secondaryLabelColor)
-            drawCalendar(calendar,x:left,y:y+24,width:width,shades:DashboardView.calendarShades(self))
-            y+=calendarHeight
+        // The usage heatmap under its heading, the unit at the right.
+        if let heatmap {
+            draw("用量热力图",NSRect(x:left,y:y,width:width,height:15),font(11,.semibold),.secondaryLabelColor)
+            draw(heatmap.hint,NSRect(x:left,y:y+1,width:width,height:14),font(10,.medium),.tertiaryLabelColor,.right)
+            drawHeatmap(heatmap,x:left,y:y+24,width:width,shades:DashboardView.heatmapShades(self))
+            y+=heatmapHeight
         }
         // Share of tokens: one bar in the tools' colours, then a key that names each colour.
         let sum=max(counted.reduce(0){$0+$1.tokens},1),shared=self.shared
@@ -547,10 +529,10 @@ final class TerminalShareCard:ShareCard {
     private var windowHeight:CGFloat {
         let chart=dashboard.dates.count>1 ? Self.chartHeight : 0
         let share:CGFloat=shared.isEmpty ? 0 : 56+CGFloat((shared.count+2)/3)*Self.legendRow
-        return Self.titleBar+Self.pad*2+32+46+80+80+chart+calendarHeight+share+rows.reduce(0){$0+Self.blockHeight($1)}+26
+        return Self.titleBar+Self.pad*2+32+46+80+80+chart+heatmapHeight+share+rows.reduce(0){$0+Self.blockHeight($1)}+26
     }
-    private static let calendarWidth=width-margin*2-pad*2
-    private var calendarHeight:CGFloat {calendar.map{24+Self.calendarGridHeight($0,width:Self.calendarWidth)+24} ?? 0}
+    private static let heatmapWidth=width-margin*2-pad*2
+    private var heatmapHeight:CGFloat {heatmap.map{24+Self.heatmapGridHeight($0,width:Self.heatmapWidth)+24} ?? 0}
     override var pictureHeight:CGFloat {Self.margin*2+windowHeight+58}
     // What the picture covers, written as dates: today, a 24-hour window, or first to last day.
     static func span(_ d:Dashboard)->String {
@@ -709,11 +691,12 @@ final class TerminalShareCard:ShareCard {
             }
             y+=Self.chartHeight
         }
-        // The usage calendar under its comment.
-        if let calendar {
-            draw("// 用量日历",NSRect(x:left,y:y,width:width,height:15),mono(10.5),c.comment)
-            drawCalendar(calendar,x:left,y:y+24,width:width,shades:[c.rule]+[0.3,0.52,0.76,1].map{c.accent.withAlphaComponent($0)})
-            y+=calendarHeight
+        // The usage heatmap under its comment, the unit at the right.
+        if let heatmap {
+            draw("// 用量热力图",NSRect(x:left,y:y,width:width,height:15),mono(10.5),c.comment)
+            draw(heatmap.hint,NSRect(x:left,y:y+1,width:width,height:14),mono(9.5),c.comment,.right)
+            drawHeatmap(heatmap,x:left,y:y+24,width:width,shades:[c.rule]+[0.3,0.52,0.76,1].map{c.accent.withAlphaComponent($0)})
+            y+=heatmapHeight
         }
         // Share of tokens as a row of cells, then a key that names each colour.
         let sum=max(counted.reduce(0){$0+$1.tokens},1),shared=self.shared
@@ -793,7 +776,7 @@ final class TerminalShareCard:ShareCard {
 }
 final class DashboardView:FlippedView {
     var data:Dashboard;var toggleProvider:((String,Bool)->Void)?;private var hoveredProvider:String?
-    private var hoveredDay:Int?;private var calendarTracking:NSTrackingArea?
+    private var hoveredDay:Int?;private var heatmapTracking:NSTrackingArea?
     private var summaryProviders:[ProviderUsage] {data.providers.compactMap{$0.summaryPart}}
     static func sectionHeight(_ p:ProviderUsage)->CGFloat {78+clientHeight(p)+CGFloat(max(1,p.models.count))*18}
     // A gateway's clients in one line, by their share of its tokens: "客户端 · ChatGPT 62% · Claude Code 30%".
@@ -814,35 +797,36 @@ final class DashboardView:FlippedView {
     // The dashboard is always 344pt wide, so the legend gets 320pt between the margins.
     static func chartExtra(_ d:Dashboard)->CGFloat {CGFloat(max(0,legendLayout(legendLabels(d),width:320).count-1))*17}
     static func summaryHeight(_ d:Dashboard)->CGFloat {d.showSummary==false ? 44 : 230+chartExtra(d)}
-    static func harnessHeaderHeight(_ d:Dashboard)->CGFloat {d.providers.isEmpty || d.showSummary==false ? 0 : 6}
-    static func height(_ d:Dashboard)->CGFloat {summaryHeight(d)+calendarHeight(d)+harnessHeaderHeight(d)+d.providers.reduce(0){$0+providerHeight($1,d)}+(d.providers.isEmpty ? 0 : 4)}
+    // The heatmap's hint line already keeps the first card clear, so no gap is added after it.
+    static func harnessHeaderHeight(_ d:Dashboard)->CGFloat {d.providers.isEmpty || d.showSummary==false || d.heatmap != nil ? 0 : 6}
+    static func height(_ d:Dashboard)->CGFloat {summaryHeight(d)+heatmapHeight(d)+harnessHeaderHeight(d)+d.providers.reduce(0){$0+providerHeight($1,d)}+(d.providers.isEmpty ? 0 : 4)}
     static func totalColor(_ view:NSView)->NSColor {dark(view) ? NSColor(srgbRed:0.43,green:0.79,blue:0.75,alpha:1) : NSColor(srgbRed:0.15,green:0.47,blue:0.46,alpha:1)}
-    // The calendar sits under Summary as squares alone, edge to edge: 35 days a row. The dashboard is always 344pt wide.
-    static let calendarGap:CGFloat=1.6
-    static let calendarPitch=(344-24+calendarGap)/CGFloat(UsageCalendar.columns)
-    static func calendarHeight(_ d:Dashboard)->CGFloat {d.calendar.map{22+CGFloat($0.rows)*calendarPitch-calendarGap} ?? 0}
-    static func calendarGrid(_ d:Dashboard,width:CGFloat)->NSRect {
-        NSRect(x:12,y:summaryHeight(d)+8,width:CGFloat(UsageCalendar.columns)*calendarPitch-calendarGap,height:CGFloat(d.calendar?.rows ?? 0)*calendarPitch-calendarGap)
+    // The heatmap sits under Summary as squares alone, edge to edge, with its unit in small type at the bottom
+    // right. The dashboard is always 344pt wide, so a row of 24 hours has larger squares than a row of 35 days.
+    static let heatmapGap:CGFloat=1.6
+    static func heatmapPitch(_ h:UsageHeatmap)->CGFloat {(344-24+heatmapGap)/CGFloat(max(1,h.columns))}
+    static func heatmapHeight(_ d:Dashboard)->CGFloat {d.heatmap.map{8+CGFloat($0.rows)*heatmapPitch($0)-heatmapGap+13} ?? 0}
+    static func heatmapGrid(_ d:Dashboard,width:CGFloat)->NSRect {
+        guard let h=d.heatmap else{return .zero}
+        let pitch=heatmapPitch(h)
+        return NSRect(x:12,y:summaryHeight(d)+8,width:CGFloat(h.columns)*pitch-heatmapGap,height:CGFloat(h.rows)*pitch-heatmapGap)
     }
-    static func calendarCell(_ d:Dashboard,width:CGFloat,row:Int,column:Int)->NSRect {
-        let grid=calendarGrid(d,width:width)
-        return NSRect(x:grid.minX+CGFloat(column)*calendarPitch,y:grid.minY+CGFloat(row)*calendarPitch,width:calendarPitch-calendarGap,height:calendarPitch-calendarGap)
+    static func heatmapCell(_ d:Dashboard,width:CGFloat,index:Int)->NSRect {
+        guard let h=d.heatmap else{return .zero}
+        let grid=heatmapGrid(d,width:width),pitch=heatmapPitch(h)
+        return NSRect(x:grid.minX+CGFloat(index%h.columns)*pitch,y:grid.minY+CGFloat(index/h.columns)*pitch,width:pitch-heatmapGap,height:pitch-heatmapGap)
     }
-    // The day under a point, or nil outside the grid and before the days read.
-    static func calendarDay(at point:NSPoint,_ d:Dashboard,width:CGFloat)->Int? {
-        guard let c=d.calendar else{return nil}
-        let grid=calendarGrid(d,width:width)
+    // The square under a point, or nil outside the grid and for squares still to come.
+    static func heatmapIndex(at point:NSPoint,_ d:Dashboard,width:CGFloat)->Int? {
+        guard let h=d.heatmap else{return nil}
+        let grid=heatmapGrid(d,width:width),pitch=heatmapPitch(h)
         guard grid.insetBy(dx:-1,dy:-1).contains(point) else{return nil}
-        let row=min(c.rows-1,max(0,Int((point.y-grid.minY)/calendarPitch))),column=min(UsageCalendar.columns-1,max(0,Int((point.x-grid.minX)/calendarPitch)))
-        let index=c.index(row:row,column:column)
-        return index>=0 && index<c.tokens.count ? index : nil
+        let index=min(h.rows-1,max(0,Int((point.y-grid.minY)/pitch)))*h.columns+min(h.columns-1,max(0,Int((point.x-grid.minX)/pitch)))
+        return index<h.past ? index : nil
     }
-    // Where a day's bubble goes: centred over its square and kept inside the dashboard, below it at the very top.
-    static func calendarBubble(_ d:Dashboard,width:CGFloat,day:Int,size:NSSize)->NSRect {
-        guard let c=d.calendar else{return .zero}
-        let row=c.rows-1-(c.tokens.count-1-day)/UsageCalendar.columns,column=day-c.index(row:row,column:0)
-        let cell=calendarCell(d,width:width,row:row,column:column),x=min(max(8,cell.midX-size.width/2),width-8-size.width)
-        let above=cell.minY-6-size.height
+    // Where a square's bubble goes: centred over it and kept inside the dashboard, below it at the very top.
+    static func heatmapBubble(_ d:Dashboard,width:CGFloat,index:Int,size:NSSize)->NSRect {
+        let cell=heatmapCell(d,width:width,index:index),x=min(max(8,cell.midX-size.width/2),width-8-size.width),above=cell.minY-6-size.height
         return NSRect(x:x,y:above>=2 ? above : cell.maxY+6,width:size.width,height:size.height)
     }
     static func heading(_ d:Dashboard)->String {d.showSummary==false ? "Harness 用量" : "Summary"}
@@ -852,7 +836,7 @@ final class DashboardView:FlippedView {
         self.data=data;super.init(frame:NSRect(x:0,y:0,width:width,height:Self.height(data)))
         setAccessibilityElement(true);setAccessibilityRole(.group);setAccessibilityLabel("用量概览")
         if data.allowCollapse==true {
-            var y=Self.summaryHeight(data)+Self.calendarHeight(data)+Self.harnessHeaderHeight(data)
+            var y=Self.summaryHeight(data)+Self.heatmapHeight(data)+Self.harnessHeaderHeight(data)
             for p in data.providers {
                 let expanded=(data.expandedProviders ?? []).contains(p.id)
                 let button=DisclosureButton(label:(expanded ? "收起 " : "展开 ")+p.name+" 明细",frame:NSRect(x:4,y:y+2,width:width-8,height:46))
@@ -869,16 +853,16 @@ final class DashboardView:FlippedView {
     // Pointing at a day shows a bubble with it and the figures.
     override func updateTrackingAreas(){
         super.updateTrackingAreas()
-        if let calendarTracking{removeTrackingArea(calendarTracking)}
-        calendarTracking=nil
-        guard data.calendar != nil else{return}
-        let area=NSTrackingArea(rect:Self.calendarGrid(data,width:bounds.width).insetBy(dx:-2,dy:-2),options:[.mouseMoved,.mouseEnteredAndExited,.activeAlways],owner:self)
-        addTrackingArea(area);calendarTracking=area
+        if let heatmapTracking{removeTrackingArea(heatmapTracking)}
+        heatmapTracking=nil
+        guard data.heatmap != nil else{return}
+        let area=NSTrackingArea(rect:Self.heatmapGrid(data,width:bounds.width).insetBy(dx:-2,dy:-2),options:[.mouseMoved,.mouseEnteredAndExited,.activeAlways],owner:self)
+        addTrackingArea(area);heatmapTracking=area
     }
-    override func mouseMoved(with event:NSEvent){hoverDay(Self.calendarDay(at:convert(event.locationInWindow,from:nil),data,width:bounds.width))}
+    override func mouseMoved(with event:NSEvent){hoverDay(Self.heatmapIndex(at:convert(event.locationInWindow,from:nil),data,width:bounds.width))}
     override func mouseEntered(with event:NSEvent){mouseMoved(with:event)}
     override func mouseExited(with event:NSEvent){hoverDay(nil)}
-    // The bubble can reach above the calendar, so the whole dashboard is redrawn when the day changes.
+    // The bubble can reach above the heatmap, so the whole dashboard is redrawn when the square changes.
     private func hoverDay(_ day:Int?){
         guard day != hoveredDay else{return}
         hoveredDay=day;needsDisplay=true
@@ -898,37 +882,41 @@ final class DashboardView:FlippedView {
         drawSummaryChart(left:left,right:right)
         }
         var y:CGFloat=Self.summaryHeight(data)
-        if let calendar=data.calendar {drawCalendar(calendar,left:left,right:right);y+=Self.calendarHeight(data)}
+        if let heatmap=data.heatmap {drawHeatmap(heatmap,left:left,right:right);y+=Self.heatmapHeight(data)}
         y+=Self.harnessHeaderHeight(data)
         for p in data.providers {if data.allowCollapse==true{drawCollapsibleProvider(p,y:y,left:left,right:right)}else{drawProvider(p,y:y,left:left,right:right)};y+=Self.providerHeight(p,data)}
-        if let calendar=data.calendar,let day=hoveredDay {drawDayBubble(calendar,day:day)}
+        if let heatmap=data.heatmap,let index=hoveredDay {drawBubble(heatmap,index:index)}
     }
     // Styled like the buttons' hints: the panel's own background, a hairline edge and rounded corners.
-    private func drawDayBubble(_ c:UsageCalendar,day:Int){
-        let lines=[c.detail(day),c.note ?? c.figures],fonts=[NSFont.systemFont(ofSize:11,weight:.medium),NSFont.systemFont(ofSize:10)]
+    private func drawBubble(_ h:UsageHeatmap,index:Int){
+        let lines=[h.detail(index),h.note ?? h.figures],fonts=[NSFont.systemFont(ofSize:11,weight:.medium),NSFont.systemFont(ofSize:10)]
         let textWidth=zip(lines,fonts).map{ceil(($0 as NSString).size(withAttributes:[.font:$1]).width)}.max() ?? 0
-        let frame=Self.calendarBubble(data,width:bounds.width,day:day,size:NSSize(width:min(bounds.width-16,textWidth+24),height:38))
+        let frame=Self.heatmapBubble(data,width:bounds.width,index:index,size:NSSize(width:min(bounds.width-16,textWidth+24),height:38))
         let shape=NSBezierPath(roundedRect:frame,xRadius:6,yRadius:6)
         background(self).setFill();shape.fill();NSColor.separatorColor.setStroke();shape.lineWidth=0.5;shape.stroke()
         text(lines[0],x:frame.minX+12,y:frame.minY+4,w:frame.width-24,size:11,weight:.medium,align:.center)
         text(lines[1],x:frame.minX+12,y:frame.minY+20,w:frame.width-24,size:10,color:.secondaryLabelColor,align:.center)
     }
-    static func calendarShades(_ view:NSView)->[NSColor] {
+    static func heatmapShades(_ view:NSView)->[NSColor] {
         let total=totalColor(view)
         return [NSColor.labelColor.withAlphaComponent(dark(view) ? 0.075 : 0.06)]+[0.3,0.52,0.76,1].map{total.withAlphaComponent($0)}
     }
-    private func drawCalendar(_ c:UsageCalendar,left:CGFloat,right:CGFloat){
-        let shades=Self.calendarShades(self),levels=c.levels
-        for row in 0..<c.rows {
-            for column in 0..<UsageCalendar.columns {
-                let index=c.index(row:row,column:column),rect=Self.calendarCell(data,width:bounds.width,row:row,column:column)
-                shades[index<0 ? 0 : levels[index]].setFill();NSBezierPath(roundedRect:rect,xRadius:1.6,yRadius:1.6).fill()
-                if index==hoveredDay {
-                    let ring=NSBezierPath(roundedRect:rect.insetBy(dx:-1,dy:-1),xRadius:2.2,yRadius:2.2);ring.lineWidth=1.2
-                    NSColor.labelColor.withAlphaComponent(0.6).setStroke();ring.stroke()
-                }
+    private func drawHeatmap(_ h:UsageHeatmap,left:CGFloat,right:CGFloat){
+        let shades=Self.heatmapShades(self),levels=h.levels
+        for index in 0..<min(h.tokens.count,h.rows*h.columns) {
+            let rect=Self.heatmapCell(data,width:bounds.width,index:index),radius=min(2.4,rect.width*0.2)
+            // Squares still to come are outlined, so the block stays whole and shows how far the day or week has gone.
+            if index>=h.past {
+                let outline=NSBezierPath(roundedRect:rect.insetBy(dx:0.4,dy:0.4),xRadius:radius,yRadius:radius);outline.lineWidth=0.8
+                shades[0].setStroke();outline.stroke();continue
+            }
+            shades[levels[index]].setFill();NSBezierPath(roundedRect:rect,xRadius:radius,yRadius:radius).fill()
+            if index==hoveredDay {
+                let ring=NSBezierPath(roundedRect:rect.insetBy(dx:-1,dy:-1),xRadius:radius+0.6,yRadius:radius+0.6);ring.lineWidth=1.2
+                NSColor.labelColor.withAlphaComponent(0.6).setStroke();ring.stroke()
             }
         }
+        text(h.hint,x:left,y:Self.heatmapGrid(data,width:bounds.width).maxY+1,w:right-left,size:7.5,color:.tertiaryLabelColor,align:.right)
     }
     // Normal states say nothing; the slot shows a problem, or a note that changes how to read the numbers.
     static func note(_ p:ProviderUsage)->(String,Bool)? {

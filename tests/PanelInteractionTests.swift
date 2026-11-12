@@ -219,48 +219,47 @@ gateway.clients=[ModelUsage(name:"ChatGPT",tokens:60,share:0.6,credits:nil),Mode
 expect(DashboardView.clientLine(gateway)=="客户端 · ChatGPT 60% · Claude Code 40%" && DashboardView.sectionHeight(gateway)==plainHeight+16,"A gateway card adds one line naming its clients")
 gateway.available=false
 expect(DashboardView.clientLine(gateway)==nil,"A card without data names no clients")
-// The usage calendar: the 175 days from Thursday 2026-05-14 up to Wednesday 2026-11-04 (day 174).
-var days=UsageCalendar(start:"2026-05-14",tokens:[Double](repeating:0,count:175),requests:[Int](repeating:0,count:175),costs:[Double](repeating:0,count:175),unpriced:[Int](repeating:0,count:175),status:"")
-expect(days.rows==1 && days.note=="暂无用量","With nothing used yet the calendar is one row")
-for (i,v) in [(160,10.0),(161,20),(162,30),(163,40),(173,5),(174,40)] {days.tokens[i]=v;days.requests[i]=1}
-days.requests[130]=3
-expect(days.levels[174]==4 && days.levels[163]==4 && days.levels[162]==3 && days.levels[160]==2 && days.levels[173]==1,"Shades go by rank, and the busiest day is the darkest")
-expect(days.levels[130]==1 && days.levels[0]==0,"Requests without tokens take the lightest shade; idle days none")
-expect(days.rows==2 && days.index(row:1,column:34)==174 && days.index(row:0,column:0)==105,"Rows of 35 days reach back to the first use, today in the bottom-right corner")
-expect(days.figures=="活跃 7 天 · 连续 2 天 · 最长 4 天" && days.note==nil,"The bubble's second line counts active days and runs")
-days.requests[174]=0;days.tokens[174]=0
-expect(days.streaks.current==1,"Before today's first request the run counts up to yesterday")
-days.tokens[174]=40;days.requests[174]=2;days.costs[174]=0.25;days.unpriced[174]=1
-expect(days.detail(174)=="11月4日 周三 · 40 Token · 已知 $0.25 · 2 请求" && days.detail(1)=="5月15日 周五 · 无用量","Pointing at a day reads it out")
-days.status="待同步"
-expect(days.note=="待同步","Before the first read the bubble says so")
-days.status="";days.requests[1]=1
-expect(days.rows==UsageCalendar.maxRows && days.index(row:0,column:0)==0,"A long history fills the days read, and no more")
-days.requests[1]=0
-var withoutCalendar=grouped;withoutCalendar.showSummary=true
-var calendarData=withoutCalendar;calendarData.calendar=days
-let calendarGrid=DashboardView.calendarGrid(calendarData,width:344)
-expect(abs(calendarGrid.minX-12)<0.01 && abs(calendarGrid.maxX-332)<0.01,"The squares run edge to edge, with nothing beside them")
-expect(DashboardView.height(calendarData)==DashboardView.height(withoutCalendar)+DashboardView.calendarHeight(calendarData) && DashboardView.calendarHeight(calendarData)<40,"Two rows make a short calendar")
-var longest=calendarData;longest.calendar!.requests[1]=1
-expect(DashboardView.calendarHeight(longest)<70,"Five rows stay under 70pt")
-func centre(_ row:Int,_ column:Int)->NSPoint {let cell=DashboardView.calendarCell(calendarData,width:344,row:row,column:column);return NSPoint(x:cell.midX,y:cell.midY)}
-expect(DashboardView.calendarDay(at:centre(1,34),calendarData,width:344)==174 && DashboardView.calendarDay(at:centre(0,0),calendarData,width:344)==105,"Each square is the day it stands for")
-expect(DashboardView.calendarDay(at:NSPoint(x:calendarGrid.midX,y:calendarGrid.maxY+6),calendarData,width:344)==nil,"Points outside the squares read nothing")
-var shortRead=calendarData;shortRead.calendar=UsageCalendar(start:"2026-07-28",tokens:[Double](repeating:1,count:100),requests:[Int](repeating:1,count:100),costs:[Double](repeating:0,count:100),unpriced:[Int](repeating:0,count:100),status:"")
-expect(shortRead.calendar!.rows==3 && DashboardView.calendarDay(at:NSPoint(x:DashboardView.calendarGrid(shortRead,width:344).minX+1,y:DashboardView.calendarGrid(shortRead,width:344).minY+1),shortRead,width:344)==nil,"Squares before the days read stand empty and read nothing")
-let bubble=DashboardView.calendarBubble(calendarData,width:344,day:174,size:NSSize(width:300,height:38)),today=DashboardView.calendarCell(calendarData,width:344,row:1,column:34)
-expect(bubble.minX>=8 && bubble.maxX<=336 && bubble.maxY<=today.minY-6,"A day's bubble sits above its square, inside the dashboard")
-for style in ShareCard.Style.allCases {
-    expect(ShareCard.make(style,calendarData,project:Project(name:"Token Monitor",url:"https://example.com")).frame.height>ShareCard.make(style,withoutCalendar,project:Project(name:"Token Monitor",url:"https://example.com")).frame.height,"The share picture carries the calendar: "+style.title)
+// The usage heatmap: a week of hours, seven rows of 24, the last 11 hours still to come.
+func heat(_ tokens:[Double],columns:Int,future:Int)->UsageHeatmap {
+    UsageHeatmap(columns:columns,labels:tokens.indices.map{"第 \($0) 格"},tokens:tokens,requests:tokens.map{$0>0 ? 1 : 0},costs:tokens.map{_ in 0},unpriced:tokens.map{_ in 0},
+                 future:future,figures:"活跃 7 小时 · 连续 2 小时 · 最长 4 小时",hint:"每行 1 天 · 每格 1 小时",status:"")
 }
-calendarData.allowCollapse=true
-let calendarFold=DashboardView(calendarData,width:344).subviews.compactMap{$0 as? DisclosureButton}.first!
-expect(calendarFold.frame.minY==DashboardView.summaryHeight(calendarData)+DashboardView.calendarHeight(calendarData)+DashboardView.harnessHeaderHeight(calendarData)+2,"Folded cards start below the calendar")
+var week=heat([Double](repeating:0,count:168),columns:24,future:11)
+expect(week.rows==7 && week.past==157 && week.note=="暂无用量","Nothing used yet says so in the bubble")
+for (i,v) in [(100,10.0),(101,20),(102,30),(103,40),(155,5),(156,40)] {week.tokens[i]=v;week.requests[i]=1}
+week.requests[60]=3
+expect(week.levels[156]==4 && week.levels[103]==4 && week.levels[102]==3 && week.levels[100]==2 && week.levels[155]==1,"Shades go by rank, and the busiest square is the darkest")
+expect(week.levels[60]==1 && week.levels[0]==0 && week.note==nil,"Requests without tokens take the lightest shade; idle squares none")
+week.costs[156]=0.25;week.unpriced[156]=1;week.requests[156]=2
+expect(week.detail(156)=="第 156 格 · 40 Token · 已知 $0.25 · 2 请求" && week.detail(1)=="第 1 格 · 无用量","Pointing at a square reads it out")
+week.status="待同步"
+expect(week.note=="待同步","Before the first read the bubble says so")
+week.status=""
+var withoutHeatmap=grouped;withoutHeatmap.showSummary=true
+var heatData=withoutHeatmap;heatData.heatmap=week
+let heatGrid=DashboardView.heatmapGrid(heatData,width:344)
+expect(abs(heatGrid.minX-12)<0.01 && abs(heatGrid.maxX-332)<0.01,"The squares run edge to edge, with nothing beside them")
+expect(DashboardView.height(heatData)==DashboardView.height(withoutHeatmap)-6+DashboardView.heatmapHeight(heatData),"The heatmap adds its height and takes the gap before the first card")
+expect(DashboardView.harnessHeaderHeight(heatData)==0 && DashboardView.harnessHeaderHeight(withoutHeatmap)==6,"The heatmap's hint keeps the first card clear, so no extra gap follows it")
+func centre(_ index:Int)->NSPoint {let cell=DashboardView.heatmapCell(heatData,width:344,index:index);return NSPoint(x:cell.midX,y:cell.midY)}
+expect(DashboardView.heatmapIndex(at:centre(156),heatData,width:344)==156 && DashboardView.heatmapIndex(at:centre(24),heatData,width:344)==24,"Each square is the hour it stands for, a day to a row")
+expect(DashboardView.heatmapIndex(at:centre(160),heatData,width:344)==nil && DashboardView.heatmapIndex(at:NSPoint(x:heatGrid.midX,y:heatGrid.maxY+6),heatData,width:344)==nil,"Squares still to come and points outside read nothing")
+var hours=heatData;hours.heatmap=heat([Double](repeating:1,count:24),columns:24,future:0)
+var days=heatData;days.heatmap=heat([Double](repeating:1,count:35),columns:35,future:0)
+expect(DashboardView.heatmapPitch(hours.heatmap!)>DashboardView.heatmapPitch(days.heatmap!) && abs(DashboardView.heatmapGrid(days,width:344).maxX-332)<0.01,"A row of hours has larger squares than a row of days; both reach the right edge")
+expect(DashboardView.heatmapHeight(hours)<36 && DashboardView.heatmapHeight(days)<36 && DashboardView.heatmapHeight(heatData)<120,"One row stays short, a week of hours under 120pt")
+let bubble=DashboardView.heatmapBubble(heatData,width:344,index:156,size:NSSize(width:300,height:38)),square=DashboardView.heatmapCell(heatData,width:344,index:156)
+expect(bubble.minX>=8 && bubble.maxX<=336 && bubble.maxY<=square.minY-6,"A square's bubble sits above it, inside the dashboard")
+for style in ShareCard.Style.allCases {
+    expect(ShareCard.make(style,heatData,project:Project(name:"Token Monitor",url:"https://example.com")).frame.height>ShareCard.make(style,withoutHeatmap,project:Project(name:"Token Monitor",url:"https://example.com")).frame.height,"The share picture carries the heatmap: "+style.title)
+}
+heatData.allowCollapse=true
+let heatFold=DashboardView(heatData,width:344).subviews.compactMap{$0 as? DisclosureButton}.first!
+expect(heatFold.frame.minY==DashboardView.summaryHeight(heatData)+DashboardView.heatmapHeight(heatData)+2,"Folded cards start right below the heatmap")
 // The heading ends before the 自动检测 button, which starts 209pt from the right of the 344pt dashboard.
 let headingFont=NSFont.systemFont(ofSize:14,weight:.semibold)
 for summary in [true,false] {
-    var d=withoutCalendar;d.showSummary=summary
+    var d=withoutHeatmap;d.showSummary=summary
     let w=(DashboardView.heading(d) as NSString).size(withAttributes:[.font:headingFont]).width
     expect(w<=DashboardView.headingWidth(344) && 12+DashboardView.headingWidth(344)<=344-209-6,"The heading fits beside the buttons: "+DashboardView.heading(d))
 }

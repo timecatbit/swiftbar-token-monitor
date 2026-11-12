@@ -18,7 +18,7 @@ class DiscoveryTests(unittest.TestCase):
     def detect(self,paths=None,**kw):return discovery.detect(paths or {},self.home,which=lambda _:None,**kw)
     def test_empty_folders_do_not_enable_unavailable_sources(self):
         for folder in ('.claude/projects','.codex/sessions','.gemini/tmp','.workbuddy-ai/projects'):(self.home/folder).mkdir(parents=True)
-        self.assertEqual(self.detect(),['summary','calendar','updates'])
+        self.assertEqual(self.detect(),['summary','heatmap','updates'])
     def test_existing_harness_records_are_detected_without_parsing(self):
         self.put('Library/Application Support/Claude/claude-code-sessions/account/org/session.json');self.put('.codex/sessions/day/one.jsonl')
         self.put('.workbuddy-ai/projects/p/one.jsonl');self.put('.gemini/tmp/p/chats/session-one.jsonl')
@@ -95,7 +95,7 @@ class DiscoveryTests(unittest.TestCase):
         after=preferences.read(state);self.assertEqual(after['visible'],['claude']);self.assertEqual(after['appearance'],'solid');self.assertEqual(after['paths'],original['paths'])
     def test_first_install_preferences_are_private_and_only_detected(self):
         state=self.home/'state';self.assertTrue(discovery.initialize(state,['summary','workbuddy','updates']))
-        self.assertEqual(preferences.read(state)['visible'],['summary','calendar','workbuddy','updates'])
+        self.assertEqual(preferences.read(state)['visible'],['summary','heatmap','workbuddy','updates'])
         self.assertEqual((state/'preferences.json').stat().st_mode&0o777,0o600)
     def test_installed_client_can_be_selected_before_first_session(self):
         app=self.home/'Applications/WorkBuddy.app';app.mkdir(parents=True)

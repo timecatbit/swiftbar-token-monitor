@@ -29,12 +29,12 @@ class ModuleTests(unittest.TestCase):
         self.assertEqual((Path(self.m.STATE_DIR)/'preferences.json').stat().st_mode & 0o777,0o600)
         preferences.update(self.m.STATE_DIR,'reset')
         self.assertIn('komari',preferences.read(self.m.STATE_DIR)['visible'])
-    def test_the_usage_calendar_shows_once_beside_summary(self):
+    def test_the_usage_heatmap_shows_once_beside_summary(self):
         root=Path(self.m.STATE_DIR);root.mkdir(parents=True,exist_ok=True)
         (root/'preferences.json').write_text(json.dumps({'schema':1,'visible':['summary','komari']}))
-        self.assertEqual(preferences.read(self.m.STATE_DIR)['visible'],['summary','calendar','komari'])
+        self.assertEqual(preferences.read(self.m.STATE_DIR)['visible'],['summary','heatmap','komari'])
         # Hiding it afterwards sticks: a saved file lists the modules it already knew.
-        self.toggle('calendar',False)
+        self.toggle('heatmap',False)
         self.assertEqual(preferences.read(self.m.STATE_DIR)['visible'],['summary','komari'])
         (root/'preferences.json').write_text(json.dumps({'schema':1,'visible':['komari']}))
         self.assertEqual(preferences.read(self.m.STATE_DIR)['visible'],['komari'],'Without Summary it stays off')
@@ -286,7 +286,7 @@ class ModuleTests(unittest.TestCase):
     def test_detection_cancel_preserves_preferences_and_does_not_refresh(self):
         preferences.update(self.m.STATE_DIR,'appearance','solid')
         target=Path(self.m.STATE_DIR)/'preferences.json';before=target.read_bytes()
-        with patch.object(self.m,'detected_modules',return_value=['summary','calendar','codex','updates']),patch.object(self.m,'confirm',return_value=False) as confirm,patch.object(self.m,'schedule_background_refresh') as refresh:
+        with patch.object(self.m,'detected_modules',return_value=['summary','heatmap','codex','updates']),patch.object(self.m,'confirm',return_value=False) as confirm,patch.object(self.m,'schedule_background_refresh') as refresh:
             self.m.run_action('detect-modules',[])
         self.assertEqual(target.read_bytes(),before);refresh.assert_not_called()
         message,detail=confirm.call_args.args
