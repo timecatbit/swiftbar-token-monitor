@@ -32,12 +32,6 @@ struct UsageHeatmap:Decodable {
     var future:Int;var hint:String;var status:String?;var notice:String?
     var rows:Int {max(1,(tokens.count+max(1,columns)-1)/max(1,columns))}
     var past:Int {max(0,tokens.count-future)}
-    // Every range keeps one square size: a row's width holds 30 squares (a month's row its own days).
-    // A row of 24 hours leaves the room of six more, where its total goes.
-    var hourly:Bool {columns==24}
-    var span:Int {hourly ? 30 : max(1,columns)}
-    // Each row's tokens so far, for the totals beside rows of hours.
-    var rowTotals:[Double] {(0..<rows).map{r in let low=r*columns,high=min(past,(r+1)*columns);return low<high ? tokens[low..<high].reduce(0,+) : 0}}
     var active:[Bool] {tokens.indices.map{tokens[$0]>0 || (requests.indices.contains($0) && requests[$0]>0)}}
     // Four shades by rank among the squares with tokens, so a few heavy ones don't wash out the rest and the
     // busiest is always the darkest. Squares with requests but no tokens (Qoder CN Credits) take the lightest.
@@ -68,6 +62,27 @@ struct UsageHeatmap:Decodable {
         if let status,!status.isEmpty {return status}
         if !active.contains(true) {return "暂无用量"}
         return (notice ?? "").isEmpty ? nil : notice
+    }
+}
+// Where each square of a heatmap goes in a given width. Every square is the same size in every range and rows
+// sit close together; the space between columns stretches so each row runs the full width, whether it holds
+// 24 hours or 31 days.
+struct HeatmapLayout {
+    // The panel's square; share pictures, which are wider, use a slightly larger one so the spacing reads the same.
+    static let cell:CGFloat=8,rowGap:CGFloat=1.6
+    let origin:NSPoint,width:CGFloat,columns:Int,rows:Int
+    var size:CGFloat=HeatmapLayout.cell
+    var columnPitch:CGFloat {columns>1 ? (width-size)/CGFloat(columns-1) : 0}
+    var rowPitch:CGFloat {size+Self.rowGap}
+    var frame:NSRect {NSRect(x:origin.x,y:origin.y,width:width,height:CGFloat(rows)*rowPitch-Self.rowGap)}
+    func square(_ index:Int)->NSRect {
+        NSRect(x:origin.x+CGFloat(index%max(1,columns))*columnPitch,y:origin.y+CGFloat(index/max(1,columns))*rowPitch,width:size,height:size)
+    }
+    // The square nearest a point, so the space between squares belongs to them too.
+    func index(at point:NSPoint)->Int? {
+        guard columns>0,frame.insetBy(dx:-1,dy:-1).contains(point) else{return nil}
+        let column=columns>1 ? Int(((point.x-origin.x-size/2)/columnPitch).rounded()) : 0,row=Int((point.y-origin.y)/rowPitch)
+        return min(rows-1,max(0,row))*columns+min(columns-1,max(0,column))
     }
 }
 struct Dashboard:Decodable {var date:String;var dates:[String];var providers:[ProviderUsage];var rangeKey:String;var rangeLabel:String;var chartUnit:String;var chartSpan:String;var period:[String]?;var chartStatus:String;var updated:String?;var chartPositions:[Double]?;var heatmap:UsageHeatmap?;var showSummary:Bool?;var allowCollapse:Bool?;var expandedProviders:[String]?}
@@ -234,18 +249,12 @@ class ShareCard:FlippedView {
     var pictureHeight:CGFloat {0}
     // The heatmap as the panel shows it, once it has been read and something has been used.
     var heatmap:UsageHeatmap? {dashboard.heatmap.flatMap{($0.status ?? "").isEmpty && $0.active.contains(true) ? $0 : nil}}
-    static func heatmapPitch(_ h:UsageHeatmap,width:CGFloat)->CGFloat {(width+DashboardView.heatmapGap)/CGFloat(h.span)}
-    static func heatmapGridHeight(_ h:UsageHeatmap,width:CGFloat)->CGFloat {CGFloat(h.rows)*heatmapPitch(h,width:width)-DashboardView.heatmapGap}
-    func drawHeatmap(_ h:UsageHeatmap,x:CGFloat,y:CGFloat,width:CGFloat,shades:[NSColor],totalFont:NSFont,totalColor:NSColor){
-        let pitch=Self.heatmapPitch(h,width:width),cell=pitch-DashboardView.heatmapGap,levels=h.levels,radius=min(2.4,cell*0.2)
-        if h.hourly {
-            let start=x+CGFloat(h.columns)*pitch
-            for (row,total) in h.rowTotals.enumerated() where total>0 {
-                draw(tokenText(total),x:start,middle:y+CGFloat(row)*pitch+cell/2,width:x+width-start,totalFont,totalColor,.right)
-            }
-        }
+    static let heatmapSquare:CGFloat=9
+    static func heatmapGridHeight(_ h:UsageHeatmap,width:CGFloat)->CGFloat {HeatmapLayout(origin:.zero,width:width,columns:h.columns,rows:h.rows,size:heatmapSquare).frame.height}
+    func drawHeatmap(_ h:UsageHeatmap,x:CGFloat,y:CGFloat,width:CGFloat,shades:[NSColor]){
+        let layout=HeatmapLayout(origin:NSPoint(x:x,y:y),width:width,columns:h.columns,rows:h.rows,size:Self.heatmapSquare),levels=h.levels,radius:CGFloat=1.8
         for index in 0..<min(h.tokens.count,h.rows*h.columns) {
-            let rect=NSRect(x:x+CGFloat(index%h.columns)*pitch,y:y+CGFloat(index/h.columns)*pitch,width:cell,height:cell)
+            let rect=layout.square(index)
             if index>=h.past {
                 let outline=NSBezierPath(roundedRect:rect.insetBy(dx:0.4,dy:0.4),xRadius:radius,yRadius:radius);outline.lineWidth=0.8
                 shades[0].setStroke();outline.stroke();continue
@@ -462,7 +471,7 @@ final class CardShareCard:ShareCard {
         if let heatmap {
             draw("用量热力图",NSRect(x:left,y:y,width:width,height:15),font(11,.semibold),.secondaryLabelColor)
             draw(heatmap.hint,NSRect(x:left,y:y+1,width:width,height:14),font(10,.medium),.tertiaryLabelColor,.right)
-            drawHeatmap(heatmap,x:left,y:y+24,width:width,shades:DashboardView.heatmapShades(self),totalFont:font(9.5,.medium,rounded:true),totalColor:.secondaryLabelColor)
+            drawHeatmap(heatmap,x:left,y:y+24,width:width,shades:DashboardView.heatmapShades(self))
             y+=heatmapHeight
         }
         // Share of tokens: one bar in the tools' colours, then a key that names each colour.
@@ -708,7 +717,7 @@ final class TerminalShareCard:ShareCard {
         if let heatmap {
             draw("// 用量热力图",NSRect(x:left,y:y,width:width,height:15),mono(10.5),c.comment)
             draw(heatmap.hint,NSRect(x:left,y:y+1,width:width,height:14),mono(9.5),c.comment,.right)
-            drawHeatmap(heatmap,x:left,y:y+24,width:width,shades:[c.rule]+[0.3,0.52,0.76,1].map{c.accent.withAlphaComponent($0)},totalFont:mono(9.5),totalColor:c.muted)
+            drawHeatmap(heatmap,x:left,y:y+24,width:width,shades:[c.rule]+[0.3,0.52,0.76,1].map{c.accent.withAlphaComponent($0)})
             y+=heatmapHeight
         }
         // Share of tokens as a row of cells, then a key that names each colour.
@@ -791,7 +800,7 @@ final class DashboardView:FlippedView {
     let data:Dashboard;var toggleProvider:((String,Bool)->Void)?;private var hoveredProvider:String?
     private var hoveredDay:Int?;private var heatmapTracking:NSTrackingArea?
     // Worked out once: measuring the shared column means scaling the chart, far too slow to do per square.
-    private let heatmapFrame:NSRect,heatmapStep:CGFloat,heatmapColumn:CGFloat,heatmapLevels:[Int]
+    private let heatmapGeometry:HeatmapLayout?,heatmapColumn:CGFloat,heatmapLevels:[Int]
     private var summaryProviders:[ProviderUsage] {data.providers.compactMap{$0.summaryPart}}
     static func sectionHeight(_ p:ProviderUsage)->CGFloat {78+clientHeight(p)+CGFloat(max(1,p.models.count))*18}
     // A gateway's clients in one line, by their share of its tokens: "客户端 · ChatGPT 62% · Claude Code 30%".
@@ -831,30 +840,22 @@ final class DashboardView:FlippedView {
         let axis=d.showSummary==false || d.dates.isEmpty ? 0 : widest(chartAxis(d).labels,axisFont)
         return max(axis,widest(d.heatmap?.rowLabels ?? [],rowFont))+10
     }
-    // The heatmap sits under Summary as squares in that column's room, with its unit in small type at the bottom
-    // right. The dashboard is always 344pt wide, so a row of 24 hours has larger squares than a row of 35 days.
-    static let heatmapGap:CGFloat=1.6
-    static func heatmapPitch(_ d:Dashboard)->CGFloat {(344-24-labelColumn(d)+heatmapGap)/CGFloat(d.heatmap?.span ?? 1)}
-    static func heatmapHeight(_ d:Dashboard)->CGFloat {d.heatmap.map{8+CGFloat($0.rows)*heatmapPitch(d)-heatmapGap+15} ?? 0}
-    static func heatmapGrid(_ d:Dashboard,width:CGFloat)->NSRect {
-        guard let h=d.heatmap else{return .zero}
-        let pitch=heatmapPitch(d)
-        return NSRect(x:12+labelColumn(d),y:summaryHeight(d)+8,width:CGFloat(h.columns)*pitch-heatmapGap,height:CGFloat(h.rows)*pitch-heatmapGap)
+    // The heatmap sits under Summary in the room after the shared column, with its unit in small type at the bottom right.
+    static func heatmapLayout(_ d:Dashboard)->HeatmapLayout? {
+        guard let h=d.heatmap else{return nil}
+        let column=labelColumn(d)
+        return HeatmapLayout(origin:NSPoint(x:12+column,y:summaryHeight(d)+8),width:344-24-column,columns:h.columns,rows:h.rows)
     }
-    static func heatmapCell(_ d:Dashboard,width:CGFloat,index:Int)->NSRect {
-        guard let h=d.heatmap else{return .zero}
-        let grid=heatmapGrid(d,width:width),pitch=heatmapPitch(d)
-        return NSRect(x:grid.minX+CGFloat(index%h.columns)*pitch,y:grid.minY+CGFloat(index/h.columns)*pitch,width:pitch-heatmapGap,height:pitch-heatmapGap)
-    }
+    static func heatmapHeight(_ d:Dashboard)->CGFloat {heatmapLayout(d).map{8+$0.frame.height+15} ?? 0}
+    static func heatmapGrid(_ d:Dashboard,width:CGFloat)->NSRect {heatmapLayout(d)?.frame ?? .zero}
+    static func heatmapCell(_ d:Dashboard,width:CGFloat,index:Int)->NSRect {heatmapLayout(d)?.square(index) ?? .zero}
     // The square under a point, or nil outside the grid and for squares still to come.
     static func heatmapIndex(at point:NSPoint,_ d:Dashboard,width:CGFloat)->Int? {
-        guard let h=d.heatmap else{return nil}
-        return heatmapIndex(at:point,h,grid:heatmapGrid(d,width:width),pitch:heatmapPitch(d))
+        guard let h=d.heatmap,let layout=heatmapLayout(d) else{return nil}
+        return heatmapIndex(at:point,h,layout)
     }
-    static func heatmapIndex(at point:NSPoint,_ h:UsageHeatmap,grid:NSRect,pitch:CGFloat)->Int? {
-        guard grid.insetBy(dx:-1,dy:-1).contains(point) else{return nil}
-        let index=min(h.rows-1,max(0,Int((point.y-grid.minY)/pitch)))*h.columns+min(h.columns-1,max(0,Int((point.x-grid.minX)/pitch)))
-        return index<h.past ? index : nil
+    static func heatmapIndex(at point:NSPoint,_ h:UsageHeatmap,_ layout:HeatmapLayout)->Int? {
+        layout.index(at:point).flatMap{$0<h.past ? $0 : nil}
     }
     // The line under the squares: the square pointed at (or why there's nothing yet) on the left, its length on the right.
     static func heatmapCaption(_ h:UsageHeatmap,pointed:Int?)->String? {pointed.map{h.detail($0)} ?? h.note}
@@ -863,7 +864,7 @@ final class DashboardView:FlippedView {
     static func headingWidth(_ width:CGFloat)->CGFloat {width-209-18}
     init(_ data:Dashboard,width:CGFloat){
         self.data=data
-        heatmapFrame=Self.heatmapGrid(data,width:width);heatmapStep=Self.heatmapPitch(data);heatmapColumn=Self.labelColumn(data);heatmapLevels=data.heatmap?.levels ?? []
+        heatmapGeometry=Self.heatmapLayout(data);heatmapColumn=Self.labelColumn(data);heatmapLevels=data.heatmap?.levels ?? []
         super.init(frame:NSRect(x:0,y:0,width:width,height:Self.height(data)))
         setAccessibilityElement(true);setAccessibilityRole(.group);setAccessibilityLabel("用量概览")
         if data.allowCollapse==true {
@@ -887,12 +888,13 @@ final class DashboardView:FlippedView {
         if let heatmapTracking{removeTrackingArea(heatmapTracking)}
         heatmapTracking=nil
         guard data.heatmap != nil else{return}
-        let area=NSTrackingArea(rect:heatmapFrame.insetBy(dx:-2,dy:-2),options:[.mouseMoved,.mouseEnteredAndExited,.activeAlways],owner:self)
+        guard let geometry=heatmapGeometry else{return}
+        let area=NSTrackingArea(rect:geometry.frame.insetBy(dx:-2,dy:-2),options:[.mouseMoved,.mouseEnteredAndExited,.activeAlways],owner:self)
         addTrackingArea(area);heatmapTracking=area
     }
     override func mouseMoved(with event:NSEvent){
-        guard let h=data.heatmap else{return}
-        hoverDay(Self.heatmapIndex(at:convert(event.locationInWindow,from:nil),h,grid:heatmapFrame,pitch:heatmapStep))
+        guard let h=data.heatmap,let geometry=heatmapGeometry else{return}
+        hoverDay(Self.heatmapIndex(at:convert(event.locationInWindow,from:nil),h,geometry))
     }
     override func mouseEntered(with event:NSEvent){mouseMoved(with:event)}
     override func mouseExited(with event:NSEvent){hoverDay(nil)}
@@ -934,18 +936,13 @@ final class DashboardView:FlippedView {
         return [NSColor.labelColor.withAlphaComponent(dark(view) ? 0.075 : 0.06)]+[0.3,0.52,0.76,1].map{total.withAlphaComponent($0)}
     }
     private func drawHeatmap(_ h:UsageHeatmap,left:CGFloat,right:CGFloat){
-        let shades=Self.heatmapShades(self),levels=heatmapLevels,grid=heatmapFrame,pitch=heatmapStep,cell=pitch-Self.heatmapGap
+        guard let layout=heatmapGeometry else{return}
+        let shades=Self.heatmapShades(self),levels=heatmapLevels,grid=layout.frame,cell=HeatmapLayout.cell
         for (row,name) in (h.rowLabels ?? []).enumerated() where row<h.rows && !name.isEmpty {
-            text(name,x:left,y:grid.minY+CGFloat(row)*pitch+cell/2-6,w:heatmapColumn-4,size:8,color:.secondaryLabelColor)
-        }
-        // A row of hours ends with that day's total, flush right like the chart's last time label.
-        if h.hourly {
-            for (row,total) in h.rowTotals.enumerated() where total>0 {
-                text(tokenText(total),x:grid.maxX+4,y:grid.minY+CGFloat(row)*pitch+cell/2-6,w:right-grid.maxX-4,size:8,color:.secondaryLabelColor,align:.right,numeric:true)
-            }
+            text(name,x:left,y:grid.minY+CGFloat(row)*layout.rowPitch+cell/2-6,w:heatmapColumn-4,size:8,color:.secondaryLabelColor)
         }
         for index in 0..<min(h.tokens.count,h.rows*h.columns,levels.count) {
-            let rect=NSRect(x:grid.minX+CGFloat(index%h.columns)*pitch,y:grid.minY+CGFloat(index/h.columns)*pitch,width:cell,height:cell),radius=min(2.4,cell*0.2)
+            let rect=layout.square(index),radius:CGFloat=1.6
             // Squares still to come are outlined, so the block stays whole and shows how far the day or week has gone.
             if index>=h.past {
                 let outline=NSBezierPath(roundedRect:rect.insetBy(dx:0.4,dy:0.4),xRadius:radius,yRadius:radius);outline.lineWidth=0.8
