@@ -265,8 +265,8 @@ expect(abs((weekSquares[24].minY-weekSquares[0].maxY)-(weekSquares[1].minX-weekS
 expect(DashboardView.heatmapHeight(hours)<34 && DashboardView.heatmapHeight(days)<34 && DashboardView.heatmapHeight(heatData)<110,"One row stays short, a week of hours under 110pt")
 // A picture taller than a phone fills the screen top to bottom: its content starts below the notch or island,
 // with a band of squares in that room, and ends clear of the home indicator.
-let tall=ShareCard.phoneInsets(content:1250,margin:22),tallTotal=1250+tall.top+tall.bottom
-expect(abs(tall.top/tallTotal-59.0/852)<0.002 && tall.bottom>=tallTotal*0.035-0.5,"A tall share picture keeps room above and below for a phone's screen; the island sits evenly in the room above")
+let tall=ShareCard.phoneInsets(content:1250,margin:22)
+expect(tall.top==63 && tall.bottom==22 && abs(tall.top*393/ShareCard.width-59)<0.5,"A tall share picture, filling a 393pt screen's width, starts its content 59pt down: the island's 11pt above and below")
 expect(ShareCard.phoneInsets(content:700,margin:22)==(22,22),"A picture no taller than a phone's screen keeps the plain margin")
 for style in ShareCard.Style.allCases {
     expect(ShareCard.make(style,heatData,project:Project(name:"Token Monitor",url:"https://example.com")).frame.height>ShareCard.make(style,withoutHeatmap,project:Project(name:"Token Monitor",url:"https://example.com")).frame.height,"The share picture carries the heatmap: "+style.title)

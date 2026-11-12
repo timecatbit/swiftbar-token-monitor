@@ -248,16 +248,14 @@ class ShareCard:FlippedView {
     var counted:[ProviderUsage] {rows.compactMap{$0.summaryPart}}
     var shared:[ProviderUsage] {counted.filter{$0.tokens>0}}
     var pictureHeight:CGFloat {0}
-    // A picture taller than a phone's screen fills it top to bottom when opened, so a notch or Dynamic Island
-    // covers the middle of its top and the home indicator its bottom edge. Such pictures keep 59/852 of their
-    // height above the content for a band of squares, so on an iPhone the island (11pt down, 37pt tall) has the
-    // same space below it as above, and 3.5% below; shorter ones are shown with bars above and below, and keep
-    // the plain margin.
-    static let phoneTop:CGFloat=59.0/852,phoneBottom:CGFloat=0.035
+    // A picture taller than a phone's screen is read filling the screen's width, its top at the top of the
+    // screen, so a notch or Dynamic Island covers the middle of its top. Such pictures start their content
+    // 63pt down: on an iPhone 393pt wide that is 59pt of screen, leaving the island (11pt down, 37pt tall) the
+    // same space below as above. The band holds a pattern of squares; the bottom keeps the plain margin, which
+    // already clears the home indicator. Shorter pictures are shown with bars above and below, and keep the margin.
+    static let phoneTop:CGFloat=63
     static func phoneInsets(content:CGFloat,margin:CGFloat)->(top:CGFloat,bottom:CGFloat) {
-        guard (content+margin*2)/width>2 else{return (margin,margin)}
-        let total=content/(1-phoneTop-phoneBottom)
-        return (max(margin,ceil(total*phoneTop)),max(margin,ceil(total*phoneBottom)))
+        (content+margin*2)/width>2 ? (max(margin,phoneTop),margin) : (margin,margin)
     }
     // The band over the top of a tall picture: loose rows of squares in the picture's colours, clustered like
     // a heatmap and fading out before the content, so whatever a phone's island covers there is only pattern.
