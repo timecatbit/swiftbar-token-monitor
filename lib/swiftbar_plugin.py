@@ -3193,7 +3193,7 @@ def summary_usage(selected):
 
 # Ranges whose heatmap goes by the hour; the rest go by the day.
 HOURLY_RANGES=('today','24h','7d','week')
-WEEKDAYS='一二三四五六日'
+WEEKDAYS=('Mon','Tue','Wed','Thu','Fri','Sat','Sun')
 
 def heatmap_cells(key, now, used):
     """The heatmap's squares for a range, in reading order, as (key into the figures, label, still to come),
@@ -3201,7 +3201,7 @@ def heatmap_cells(key, now, used):
     Today and 24 hours are a row of hours, 7 days and this week a row of hours per day (this week only up to
     today), 30 days and this month a row of days, and 全部 rows of 35 days, as many as reach back to the first day used."""
     zone=now.tzinfo;day=now.replace(hour=0,minute=0,second=0,microsecond=0)
-    def name(d):return '%d月%d日 周%s'%(d.month,d.day,WEEKDAYS[d.weekday()])
+    def name(d):return '%d月%d日 %s'%(d.month,d.day,WEEKDAYS[d.weekday()])
     if key in HOURLY_RANGES:
         if key=='24h':
             base=int(now.timestamp())//3600*3600-23*3600
@@ -3211,7 +3211,7 @@ def heatmap_cells(key, now, used):
             # Each row is one local day of wall-clock hours.
             rows={'today':1,'7d':7,'week':day.weekday()+1}[key]
             moments=[(first+timedelta(days=d)).replace(hour=h) for d in range(rows) for h in range(24)]
-            names=['今天'] if key=='today' else ['周'+WEEKDAYS[(first+timedelta(days=d)).weekday()] for d in range(rows)]
+            names=['今天'] if key=='today' else [WEEKDAYS[(first+timedelta(days=d)).weekday()] for d in range(rows)]
         return [(int(m.timestamp())//3600*3600,name(m)+' %02d:00'%m.hour,m>now) for m in moments],24,names
     if key=='30d':first,count=day-timedelta(days=29),30
     elif key=='month':first,count=day.replace(day=1),calendar.monthrange(day.year,day.month)[1]

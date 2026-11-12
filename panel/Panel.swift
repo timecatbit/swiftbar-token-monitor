@@ -776,8 +776,10 @@ final class TerminalShareCard:ShareCard {
     }
 }
 final class DashboardView:FlippedView {
-    var data:Dashboard;var toggleProvider:((String,Bool)->Void)?;private var hoveredProvider:String?
+    let data:Dashboard;var toggleProvider:((String,Bool)->Void)?;private var hoveredProvider:String?
     private var hoveredDay:Int?;private var heatmapTracking:NSTrackingArea?
+    // Worked out once: measuring the shared column means scaling the chart, far too slow to do per square.
+    private let heatmapFrame:NSRect,heatmapStep:CGFloat,heatmapColumn:CGFloat,heatmapLevels:[Int]
     private var summaryProviders:[ProviderUsage] {data.providers.compactMap{$0.summaryPart}}
     static func sectionHeight(_ p:ProviderUsage)->CGFloat {78+clientHeight(p)+CGFloat(max(1,p.models.count))*18}
     // A gateway's clients in one line, by their share of its tokens: "客户端 · ChatGPT 62% · Claude Code 30%".
@@ -835,7 +837,9 @@ final class DashboardView:FlippedView {
     // The square under a point, or nil outside the grid and for squares still to come.
     static func heatmapIndex(at point:NSPoint,_ d:Dashboard,width:CGFloat)->Int? {
         guard let h=d.heatmap else{return nil}
-        let grid=heatmapGrid(d,width:width),pitch=heatmapPitch(d)
+        return heatmapIndex(at:point,h,grid:heatmapGrid(d,width:width),pitch:heatmapPitch(d))
+    }
+    static func heatmapIndex(at point:NSPoint,_ h:UsageHeatmap,grid:NSRect,pitch:CGFloat)->Int? {
         guard grid.insetBy(dx:-1,dy:-1).contains(point) else{return nil}
         let index=min(h.rows-1,max(0,Int((point.y-grid.minY)/pitch)))*h.columns+min(h.columns-1,max(0,Int((point.x-grid.minX)/pitch)))
         return index<h.past ? index : nil
@@ -846,7 +850,9 @@ final class DashboardView:FlippedView {
     // The heading ends clear of the buttons beside it; the leftmost one (自动检测) starts 209pt from the right.
     static func headingWidth(_ width:CGFloat)->CGFloat {width-209-18}
     init(_ data:Dashboard,width:CGFloat){
-        self.data=data;super.init(frame:NSRect(x:0,y:0,width:width,height:Self.height(data)))
+        self.data=data
+        heatmapFrame=Self.heatmapGrid(data,width:width);heatmapStep=Self.heatmapPitch(data);heatmapColumn=Self.labelColumn(data);heatmapLevels=data.heatmap?.levels ?? []
+        super.init(frame:NSRect(x:0,y:0,width:width,height:Self.height(data)))
         setAccessibilityElement(true);setAccessibilityRole(.group);setAccessibilityLabel("用量概览")
         if data.allowCollapse==true {
             var y=Self.summaryHeight(data)+Self.heatmapHeight(data)+Self.harnessHeaderHeight(data)
@@ -869,10 +875,13 @@ final class DashboardView:FlippedView {
         if let heatmapTracking{removeTrackingArea(heatmapTracking)}
         heatmapTracking=nil
         guard data.heatmap != nil else{return}
-        let area=NSTrackingArea(rect:Self.heatmapGrid(data,width:bounds.width).insetBy(dx:-2,dy:-2),options:[.mouseMoved,.mouseEnteredAndExited,.activeAlways],owner:self)
+        let area=NSTrackingArea(rect:heatmapFrame.insetBy(dx:-2,dy:-2),options:[.mouseMoved,.mouseEnteredAndExited,.activeAlways],owner:self)
         addTrackingArea(area);heatmapTracking=area
     }
-    override func mouseMoved(with event:NSEvent){hoverDay(Self.heatmapIndex(at:convert(event.locationInWindow,from:nil),data,width:bounds.width))}
+    override func mouseMoved(with event:NSEvent){
+        guard let h=data.heatmap else{return}
+        hoverDay(Self.heatmapIndex(at:convert(event.locationInWindow,from:nil),h,grid:heatmapFrame,pitch:heatmapStep))
+    }
     override func mouseEntered(with event:NSEvent){mouseMoved(with:event)}
     override func mouseExited(with event:NSEvent){hoverDay(nil)}
     private func hoverDay(_ day:Int?){
@@ -882,6 +891,8 @@ final class DashboardView:FlippedView {
     override func draw(_ dirtyRect:NSRect){
         let left:CGFloat=12,right=bounds.width-12,width=right-left
         let valid=summaryProviders.filter{$0.available},costs=valid.compactMap{$0.cost}
+        let summaryBand=NSRect(x:0,y:0,width:bounds.width,height:Self.summaryHeight(data))
+        if dirtyRect.intersects(summaryBand) {
         text(Self.heading(data),x:left,y:10,w:Self.headingWidth(bounds.width),size:14,weight:.semibold)
         if data.showSummary != false {
         let partial=valid.count != summaryProviders.count || valid.contains{$0.unpriced>0}
@@ -893,22 +904,30 @@ final class DashboardView:FlippedView {
         for i in 0..<3 {let x=left+third*CGFloat(i)+2*CGFloat(i);text(labels[i],x:x,y:40,w:third-4,size:10,color:.secondaryLabelColor,align:alignments[i]);text(values[i],x:x,y:56,w:third-4,size:i==2 ? 20 : 21,weight:.medium,align:alignments[i],numeric:true)}
         drawSummaryChart(left:left,right:right)
         }
+        }
         var y:CGFloat=Self.summaryHeight(data)
-        if let heatmap=data.heatmap {drawHeatmap(heatmap,left:left,right:right);y+=Self.heatmapHeight(data)}
+        if let heatmap=data.heatmap {
+            if dirtyRect.intersects(NSRect(x:0,y:y,width:bounds.width,height:Self.heatmapHeight(data))){drawHeatmap(heatmap,left:left,right:right)}
+            y+=Self.heatmapHeight(data)
+        }
         y+=Self.harnessHeaderHeight(data)
-        for p in data.providers {if data.allowCollapse==true{drawCollapsibleProvider(p,y:y,left:left,right:right)}else{drawProvider(p,y:y,left:left,right:right)};y+=Self.providerHeight(p,data)}
+        for p in data.providers {
+            let height=Self.providerHeight(p,data)
+            if dirtyRect.intersects(NSRect(x:0,y:y,width:bounds.width,height:height)){if data.allowCollapse==true{drawCollapsibleProvider(p,y:y,left:left,right:right)}else{drawProvider(p,y:y,left:left,right:right)}}
+            y+=height
+        }
     }
     static func heatmapShades(_ view:NSView)->[NSColor] {
         let total=totalColor(view)
         return [NSColor.labelColor.withAlphaComponent(dark(view) ? 0.075 : 0.06)]+[0.3,0.52,0.76,1].map{total.withAlphaComponent($0)}
     }
     private func drawHeatmap(_ h:UsageHeatmap,left:CGFloat,right:CGFloat){
-        let shades=Self.heatmapShades(self),levels=h.levels,grid=Self.heatmapGrid(data,width:bounds.width),pitch=Self.heatmapPitch(data)
+        let shades=Self.heatmapShades(self),levels=heatmapLevels,grid=heatmapFrame,pitch=heatmapStep,cell=pitch-Self.heatmapGap
         for (row,name) in (h.rowLabels ?? []).enumerated() where row<h.rows && !name.isEmpty {
-            text(name,x:left,y:grid.minY+CGFloat(row)*pitch+(pitch-Self.heatmapGap)/2-6,w:Self.labelColumn(data)-4,size:8,color:.secondaryLabelColor)
+            text(name,x:left,y:grid.minY+CGFloat(row)*pitch+cell/2-6,w:heatmapColumn-4,size:8,color:.secondaryLabelColor)
         }
-        for index in 0..<min(h.tokens.count,h.rows*h.columns) {
-            let rect=Self.heatmapCell(data,width:bounds.width,index:index),radius=min(2.4,rect.width*0.2)
+        for index in 0..<min(h.tokens.count,h.rows*h.columns,levels.count) {
+            let rect=NSRect(x:grid.minX+CGFloat(index%h.columns)*pitch,y:grid.minY+CGFloat(index/h.columns)*pitch,width:cell,height:cell),radius=min(2.4,cell*0.2)
             // Squares still to come are outlined, so the block stays whole and shows how far the day or week has gone.
             if index>=h.past {
                 let outline=NSBezierPath(roundedRect:rect.insetBy(dx:0.4,dy:0.4),xRadius:radius,yRadius:radius);outline.lineWidth=0.8

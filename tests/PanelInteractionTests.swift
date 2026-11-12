@@ -224,7 +224,7 @@ func heat(_ tokens:[Double],columns:Int,future:Int,rows:[String]=[])->UsageHeatm
     UsageHeatmap(columns:columns,rowLabels:rows,labels:tokens.indices.map{"第 \($0) 格"},tokens:tokens,requests:tokens.map{$0>0 ? 1 : 0},costs:tokens.map{_ in 0},unpriced:tokens.map{_ in 0},
                  future:future,hint:"每格 1 小时",status:"",notice:"")
 }
-var week=heat([Double](repeating:0,count:168),columns:24,future:11,rows:["周四","周五","周六","周日","周一","周二","周三"])
+var week=heat([Double](repeating:0,count:168),columns:24,future:11,rows:["Thu","Fri","Sat","Sun","Mon","Tue","Wed"])
 expect(week.rows==7 && week.past==157 && week.note=="暂无用量","Nothing used yet says so under the squares")
 for (i,v) in [(100,10.0),(101,20),(102,30),(103,40),(155,5),(156,40)] {week.tokens[i]=v;week.requests[i]=1}
 week.requests[60]=3
@@ -250,6 +250,7 @@ expect(DashboardView.labelColumn(wideRow)>=DashboardView.labelColumn(withoutHeat
 expect(DashboardView.height(heatData)==DashboardView.height(withoutHeatmap)-6+DashboardView.heatmapHeight(heatData),"The heatmap adds its height and takes the gap before the first card")
 expect(DashboardView.harnessHeaderHeight(heatData)==0 && DashboardView.harnessHeaderHeight(withoutHeatmap)==6,"The heatmap's hint keeps the first card clear, so no extra gap follows it")
 func centre(_ index:Int)->NSPoint {let cell=DashboardView.heatmapCell(heatData,width:344,index:index);return NSPoint(x:cell.midX,y:cell.midY)}
+expect(DashboardView.heatmapIndex(at:centre(156),week,grid:heatGrid,pitch:DashboardView.heatmapPitch(heatData))==156,"The view reads the square from the layout it worked out once")
 expect(DashboardView.heatmapIndex(at:centre(156),heatData,width:344)==156 && DashboardView.heatmapIndex(at:centre(24),heatData,width:344)==24,"Each square is the hour it stands for, a day to a row")
 expect(DashboardView.heatmapIndex(at:centre(160),heatData,width:344)==nil && DashboardView.heatmapIndex(at:NSPoint(x:heatGrid.midX,y:heatGrid.maxY+6),heatData,width:344)==nil,"Squares still to come and points outside read nothing")
 var hours=heatData;hours.heatmap=heat([Double](repeating:1,count:24),columns:24,future:0)
