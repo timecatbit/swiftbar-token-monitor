@@ -219,37 +219,41 @@ gateway.clients=[ModelUsage(name:"ChatGPT",tokens:60,share:0.6,credits:nil),Mode
 expect(DashboardView.clientLine(gateway)=="客户端 · ChatGPT 60% · Claude Code 40%" && DashboardView.sectionHeight(gateway)==plainHeight+16,"A gateway card adds one line naming its clients")
 gateway.available=false
 expect(DashboardView.clientLine(gateway)==nil,"A card without data names no clients")
-// The usage calendar: every day from 2026-06-01 up to Wednesday 2026-11-04 (day 156); Oct 1 is day 122, Nov 1 day 153.
-var days=UsageCalendar(start:"2026-06-01",tokens:[Double](repeating:0,count:157),requests:[Int](repeating:0,count:157),costs:[Double](repeating:0,count:157),unpriced:[Int](repeating:0,count:157),status:"")
-expect(days.rows.map{"\($0.label):\($0.first):\($0.length)"}==["11月:153:30"] && days.summary=="暂无用量","With nothing used yet the calendar is this month alone")
-for (i,v) in [(130,10.0),(131,20),(132,30),(133,40),(155,5),(156,40)] {days.tokens[i]=v;days.requests[i]=1}
-days.requests[140]=3
-expect(days.levels[156]==4 && days.levels[133]==4 && days.levels[132]==3 && days.levels[130]==2 && days.levels[155]==1,"Shades go by rank, and the busiest day is the darkest")
-expect(days.levels[140]==1 && days.levels[0]==0,"Requests without tokens take the lightest shade; idle days none")
-expect(days.rows.map{"\($0.label):\($0.first):\($0.length)"}==["10月:122:31","11月:153:30"],"One row per month, from the first month with any use")
-expect(days.summary=="活跃 7 天 · 连续 2 天 · 最长 4 天","The line under the calendar counts active days and runs")
-days.requests[156]=0;days.tokens[156]=0
+// The usage calendar: the 175 days from Thursday 2026-05-14 up to Wednesday 2026-11-04 (day 174).
+var days=UsageCalendar(start:"2026-05-14",tokens:[Double](repeating:0,count:175),requests:[Int](repeating:0,count:175),costs:[Double](repeating:0,count:175),unpriced:[Int](repeating:0,count:175),status:"")
+expect(days.rows==1 && days.note=="暂无用量","With nothing used yet the calendar is one row")
+for (i,v) in [(160,10.0),(161,20),(162,30),(163,40),(173,5),(174,40)] {days.tokens[i]=v;days.requests[i]=1}
+days.requests[130]=3
+expect(days.levels[174]==4 && days.levels[163]==4 && days.levels[162]==3 && days.levels[160]==2 && days.levels[173]==1,"Shades go by rank, and the busiest day is the darkest")
+expect(days.levels[130]==1 && days.levels[0]==0,"Requests without tokens take the lightest shade; idle days none")
+expect(days.rows==2 && days.index(row:1,column:34)==174 && days.index(row:0,column:0)==105,"Rows of 35 days reach back to the first use, today in the bottom-right corner")
+expect(days.figures=="活跃 7 天 · 连续 2 天 · 最长 4 天" && days.note==nil,"The bubble's second line counts active days and runs")
+days.requests[174]=0;days.tokens[174]=0
 expect(days.streaks.current==1,"Before today's first request the run counts up to yesterday")
-days.tokens[156]=40;days.requests[156]=2;days.costs[156]=0.25;days.unpriced[156]=1
-expect(days.detail(156)=="11月4日 周三 · 40 Token · 已知 $0.25 · 2 请求" && days.detail(1)=="6月2日 周二 · 无用量","Pointing at a day reads it out")
+days.tokens[174]=40;days.requests[174]=2;days.costs[174]=0.25;days.unpriced[174]=1
+expect(days.detail(174)=="11月4日 周三 · 40 Token · 已知 $0.25 · 2 请求" && days.detail(1)=="5月15日 周五 · 无用量","Pointing at a day reads it out")
 days.status="待同步"
-expect(days.summary=="待同步","Before the first read the calendar says so")
+expect(days.note=="待同步","Before the first read the bubble says so")
 days.status="";days.requests[1]=1
-expect(days.rows.count==UsageCalendar.maxMonths && days.rows.first?.label=="6月","A long history shows the months read, and no more")
+expect(days.rows==UsageCalendar.maxRows && days.index(row:0,column:0)==0,"A long history fills the days read, and no more")
 days.requests[1]=0
 var withoutCalendar=grouped;withoutCalendar.showSummary=true
 var calendarData=withoutCalendar;calendarData.calendar=days
 let calendarGrid=DashboardView.calendarGrid(calendarData,width:344)
-expect(abs(calendarGrid.minX-36)<0.01 && abs(calendarGrid.maxX-332)<0.01,"31 days fill the width between the month names and the right edge")
-expect(DashboardView.height(calendarData)==DashboardView.height(withoutCalendar)+DashboardView.calendarHeight(calendarData) && DashboardView.calendarHeight(calendarData)<60,"Two months make a short calendar")
+expect(abs(calendarGrid.minX-12)<0.01 && abs(calendarGrid.maxX-332)<0.01,"The squares run edge to edge, with nothing beside them")
+expect(DashboardView.height(calendarData)==DashboardView.height(withoutCalendar)+DashboardView.calendarHeight(calendarData) && DashboardView.calendarHeight(calendarData)<40,"Two rows make a short calendar")
 var longest=calendarData;longest.calendar!.requests[1]=1
-expect(DashboardView.calendarHeight(longest)<100,"Six months stay under 100pt")
-let pitch=DashboardView.calendarPitch
-func pointAt(_ row:Int,_ column:Int)->NSPoint {NSPoint(x:calendarGrid.minX+(CGFloat(column)+0.5)*pitch,y:calendarGrid.minY+(CGFloat(row)+0.5)*pitch)}
-expect(DashboardView.calendarDay(at:pointAt(0,0),calendarData,width:344)==122 && DashboardView.calendarDay(at:pointAt(0,30),calendarData,width:344)==152,"The first row runs from Oct 1 to Oct 31")
-expect(DashboardView.calendarDay(at:pointAt(1,3),calendarData,width:344)==156,"Today is in the last row")
-expect(DashboardView.calendarDay(at:pointAt(1,4),calendarData,width:344)==nil && DashboardView.calendarDay(at:pointAt(1,30),calendarData,width:344)==nil,"Days after today and past a month's end read nothing")
-expect(DashboardView.calendarDay(at:NSPoint(x:calendarGrid.minX-6,y:calendarGrid.minY+2),calendarData,width:344)==nil,"The month names are not days")
+expect(DashboardView.calendarHeight(longest)<70,"Five rows stay under 70pt")
+func centre(_ row:Int,_ column:Int)->NSPoint {let cell=DashboardView.calendarCell(calendarData,width:344,row:row,column:column);return NSPoint(x:cell.midX,y:cell.midY)}
+expect(DashboardView.calendarDay(at:centre(1,34),calendarData,width:344)==174 && DashboardView.calendarDay(at:centre(0,0),calendarData,width:344)==105,"Each square is the day it stands for")
+expect(DashboardView.calendarDay(at:NSPoint(x:calendarGrid.midX,y:calendarGrid.maxY+6),calendarData,width:344)==nil,"Points outside the squares read nothing")
+var shortRead=calendarData;shortRead.calendar=UsageCalendar(start:"2026-07-28",tokens:[Double](repeating:1,count:100),requests:[Int](repeating:1,count:100),costs:[Double](repeating:0,count:100),unpriced:[Int](repeating:0,count:100),status:"")
+expect(shortRead.calendar!.rows==3 && DashboardView.calendarDay(at:NSPoint(x:DashboardView.calendarGrid(shortRead,width:344).minX+1,y:DashboardView.calendarGrid(shortRead,width:344).minY+1),shortRead,width:344)==nil,"Squares before the days read stand empty and read nothing")
+let bubble=DashboardView.calendarBubble(calendarData,width:344,day:174,size:NSSize(width:300,height:38)),today=DashboardView.calendarCell(calendarData,width:344,row:1,column:34)
+expect(bubble.minX>=8 && bubble.maxX<=336 && bubble.maxY<=today.minY-6,"A day's bubble sits above its square, inside the dashboard")
+for style in ShareCard.Style.allCases {
+    expect(ShareCard.make(style,calendarData,project:Project(name:"Token Monitor",url:"https://example.com")).frame.height>ShareCard.make(style,withoutCalendar,project:Project(name:"Token Monitor",url:"https://example.com")).frame.height,"The share picture carries the calendar: "+style.title)
+}
 calendarData.allowCollapse=true
 let calendarFold=DashboardView(calendarData,width:344).subviews.compactMap{$0 as? DisclosureButton}.first!
 expect(calendarFold.frame.minY==DashboardView.summaryHeight(calendarData)+DashboardView.calendarHeight(calendarData)+DashboardView.harnessHeaderHeight(calendarData)+2,"Folded cards start below the calendar")
