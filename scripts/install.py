@@ -4,6 +4,7 @@ import argparse
 from datetime import datetime
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -14,6 +15,10 @@ ENTRY = 'token-monitor.30s.sh'
 LEGACY = [Path('opencodex.30s.sh'), Path('assets/deepseek-logo.svg'), Path('assets/deepseek-logo.png'), Path('assets/logos')]
 LEGACY_DATA = ('auto-update.json', 'updates-notified.json')
 HERE = Path(__file__).resolve().parent
+BACKUPS = Path.home() / 'Library/Application Support/SwiftBarToken/backups'
+# Each install backs up the version it replaces under a folder named for when it ran; the newest few are kept.
+BACKUP_NAME = re.compile(r'\d{8}-\d{6}-[0-9a-f]{6}')
+KEEP_BACKUPS = 5
 # A source checkout keeps this script in scripts/; a release package keeps it beside the entry.
 ROOT = HERE if (HERE / ENTRY).is_file() else HERE.parent
 sys.path.insert(0, str(ROOT / 'lib'))
@@ -43,6 +48,32 @@ def stage(destination, transport):
         shutil.rmtree(staging, ignore_errors=True)
         raise
     return staging
+
+def back_up(destination, previous, root=BACKUPS):
+    """Copy the parts this install replaces, then drop the older install backups."""
+    backup = root / (datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:6])
+    backup.mkdir(parents=True, mode=0o700)
+    for relative in previous:
+        copy(destination / relative, backup / relative)
+    removed = prune_backups(root, backup.name)
+    if removed: print('Removed %d older backup%s' % (len(removed), '' if len(removed) == 1 else 's'))
+    return backup
+
+def prune_backups(root, current, keep=KEEP_BACKUPS):
+    """Keep the backup just written and the newest others, up to keep in all. Only folders named like an
+    install backup go; other folders here (removed plugins, cleaned-up configuration) and links stay.
+    A backup that can't be removed is left for the next install, which never fails over it."""
+    try:
+        others = sorted(entry.name for entry in os.scandir(root)
+                        if entry.name != current and BACKUP_NAME.fullmatch(entry.name) and entry.is_dir(follow_symlinks=False))
+    except OSError:
+        return []
+    removed = []
+    for name in others[:max(0, len(others) - (keep - 1))]:
+        try: shutil.rmtree(root / name)
+        except OSError: continue
+        removed.append(name)
+    return removed
 
 def remove(path):
     if path.is_dir() and not path.is_symlink(): shutil.rmtree(path)
@@ -100,12 +131,7 @@ def main():
     paths = [Path(ENTRY), relative_app, relative_assets, local_config, Path('.opencodex-panel/lib'),relative_transport]+LEGACY
     previous = [p for p in paths if (destination / p).exists()]
     if previous:
-        stamp = datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:6]
-        backup = Path.home() / 'Library/Application Support/SwiftBarToken/backups' / stamp
-        backup.mkdir(parents=True, mode=0o700)
-        for relative in previous:
-            copy(destination / relative, backup / relative)
-        print('Backup:', backup)
+        print('Backup:', back_up(destination, previous))
     staging = stage(destination, transport)
     # Only close an already running helper. Never launch SwiftBar via AppleScript.
     if not args.no_refresh:

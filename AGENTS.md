@@ -68,5 +68,5 @@
 - 用户配置只从 Application Support/SwiftBarToken/config.local.sh 加载；升级不自动导入仓库配置。常用连接通过主页模块的悬停侧栏设置，未配置不发请求，取消不写入；自动检测不把注释或示例地址当配置。
 - 隐藏面板不运行每秒轮询或鼠标监听；通过目录事件接收原子发布的快照/回执，打开时立即按正常时效检查。
 - 配置与凭据必须留在本机。不要提交 `config.local.sh`、运行缓存、日志、SQLite 数据或含私人用量的截图。
-- 安装使用 `scripts/install.py`，保留备份与本机状态。新的面板、lib、资源与 HTTP 组件先在 `.opencodex-panel/.install-*` 完整暂存并校验签名，通过后才关闭面板、逐个整体改名替换（不合并进旧目录）；发布入口前任何一步失败都把旧版放回，不能留下新旧混装。不要复制工作聊天里的历史目录作为新的维护源。
+- 安装使用 `scripts/install.py`，保留备份与本机状态。备份只留最近 5 份：新备份写完后才删除更早的安装备份（目录名为 `YYYYMMDD-HHMMSS-xxxxxx` 的），其他目录（removed-plugins 等）和链接不动，删不掉就留到下次，不影响安装。新的面板、lib、资源与 HTTP 组件先在 `.opencodex-panel/.install-*` 完整暂存并校验签名，通过后才关闭面板、逐个整体改名替换（不合并进旧目录）；发布入口前任何一步失败都把旧版放回，不能留下新旧混装。不要复制工作聊天里的历史目录作为新的维护源。
 - 公开发布包由 `scripts/package.py` 生成 `token-monitor-<版本>.zip`：预编译的通用面板放在 `build/`，`install.py` 与入口同在包根目录，不含按解释器准备的 HTTP 组件（安装时在用户机器上准备）。推送 `v<版本>` 标签后 `.github/workflows/release.yml` 在 macOS 26 上检查、打包、用空插件目录试装再发布 Release；版本号须与 `VERSION`、`xbar.version` 和 CHANGELOG 一致。发布包安装同样不得引用包目录。
