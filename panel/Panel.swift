@@ -64,17 +64,18 @@ struct UsageHeatmap:Decodable {
         return (notice ?? "").isEmpty ? nil : notice
     }
 }
-// Where each square of a heatmap goes in a given width. Every square is the same size in every range and rows
-// sit close together; the space between columns stretches so each row runs the full width, whether it holds
-// 24 hours or 31 days.
+// Where each square of a heatmap goes in a given width. Every square is the same size in every range; the space
+// between squares stretches so each row runs the full width, whether it holds 24 hours or 31 days, and rows sit
+// that same space apart, so the spacing is even every way.
 struct HeatmapLayout {
     // The panel's square; share pictures, which are wider, use a slightly larger one so the spacing reads the same.
     static let cell:CGFloat=8,rowGap:CGFloat=1.6
     let origin:NSPoint,width:CGFloat,columns:Int,rows:Int
     var size:CGFloat=HeatmapLayout.cell
     var columnPitch:CGFloat {columns>1 ? (width-size)/CGFloat(columns-1) : 0}
-    var rowPitch:CGFloat {size+Self.rowGap}
-    var frame:NSRect {NSRect(x:origin.x,y:origin.y,width:width,height:CGFloat(rows)*rowPitch-Self.rowGap)}
+    var gap:CGFloat {columns>1 ? columnPitch-size : Self.rowGap}
+    var rowPitch:CGFloat {size+gap}
+    var frame:NSRect {NSRect(x:origin.x,y:origin.y,width:width,height:CGFloat(rows)*rowPitch-gap)}
     func square(_ index:Int)->NSRect {
         NSRect(x:origin.x+CGFloat(index%max(1,columns))*columnPitch,y:origin.y+CGFloat(index/max(1,columns))*rowPitch,width:size,height:size)
     }

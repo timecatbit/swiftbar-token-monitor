@@ -260,7 +260,9 @@ var days=heatData;days.heatmap=heat([Double](repeating:1,count:30),columns:30,fu
 let hourSquares=(0..<24).map{DashboardView.heatmapCell(hours,width:344,index:$0)},daySquares=(0..<30).map{DashboardView.heatmapCell(days,width:344,index:$0)}
 expect((hourSquares+daySquares).allSatisfy{$0.width==HeatmapLayout.cell && $0.height==HeatmapLayout.cell},"Every range draws the same size of square")
 expect(abs(hourSquares.last!.maxX-332)<0.01 && abs(daySquares.last!.maxX-332)<0.01 && hourSquares[1].minX-hourSquares[0].maxX>daySquares[1].minX-daySquares[0].maxX,"Rows of hours and of days both run to the right edge; the space between columns stretches instead")
-expect(DashboardView.heatmapHeight(hours)<34 && DashboardView.heatmapHeight(days)<34 && DashboardView.heatmapHeight(heatData)<100,"One row stays short, a week of hours under 100pt")
+let weekLayout=DashboardView.heatmapLayout(heatData)!,weekSquares=(0..<48).map{DashboardView.heatmapCell(heatData,width:344,index:$0)}
+expect(abs((weekSquares[24].minY-weekSquares[0].maxY)-(weekSquares[1].minX-weekSquares[0].maxX))<0.01 && abs(weekLayout.gap-(weekSquares[1].minX-weekSquares[0].maxX))<0.01,"Rows sit as far apart as columns, so the spacing is even every way")
+expect(DashboardView.heatmapHeight(hours)<34 && DashboardView.heatmapHeight(days)<34 && DashboardView.heatmapHeight(heatData)<110,"One row stays short, a week of hours under 110pt")
 for style in ShareCard.Style.allCases {
     expect(ShareCard.make(style,heatData,project:Project(name:"Token Monitor",url:"https://example.com")).frame.height>ShareCard.make(style,withoutHeatmap,project:Project(name:"Token Monitor",url:"https://example.com")).frame.height,"The share picture carries the heatmap: "+style.title)
 }
