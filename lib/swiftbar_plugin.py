@@ -1710,8 +1710,9 @@ def qoder_subscription_lines(data):
 
 
 RANGES={'today':'当天','24h':'近 24 小时','7d':'近 7 天','30d':'近 30 天','week':'本周','month':'本月','all':'全部'}
-# For 全部, the heatmap shows up to the last 175 days: five rows of five weeks.
-HEATMAP_DAYS=175
+# For 全部, the heatmap shows up to the last 180 days: six rows of 30, the same width as 近 30 天.
+HEATMAP_DAYS=180
+HEATMAP_ROW=30
 
 def usage_now():
     from zoneinfo import ZoneInfo
@@ -3199,7 +3200,7 @@ def heatmap_cells(key, now, used):
     """The heatmap's squares for a range, in reading order, as (key into the figures, label, still to come),
     with the number of columns and a short name for each row, set beside it like the chart's axis labels.
     Today and 24 hours are a row of hours, 7 days and this week a row of hours per day (this week only up to
-    today), 30 days and this month a row of days, and 全部 rows of 35 days, as many as reach back to the first day used."""
+    today), 30 days and this month a row of days, and 全部 rows of 30 days, as many as reach back to the first day used."""
     zone=now.tzinfo;day=now.replace(hour=0,minute=0,second=0,microsecond=0)
     def name(d):return '%d月%d日 %s'%(d.month,d.day,WEEKDAYS[d.weekday()])
     if key in HOURLY_RANGES:
@@ -3219,14 +3220,14 @@ def heatmap_cells(key, now, used):
         start=day-timedelta(days=HEATMAP_DAYS-1)
         since=[d for d in used if d>=start.date().isoformat()]
         span=(day.date()-datetime.strptime(min(since),'%Y-%m-%d').date()).days+1 if since else 1
-        count=min(HEATMAP_DAYS,-(-span//35)*35);first=day-timedelta(days=count-1)
+        count=min(HEATMAP_DAYS,-(-span//HEATMAP_ROW)*HEATMAP_ROW);first=day-timedelta(days=count-1)
     dates=[(first+timedelta(days=i)).date() for i in range(count)]
     if key=='all':
         # A row is named for the month it starts in, once per month.
-        starts=[dates[i].month for i in range(0,count,35)]
+        starts=[dates[i].month for i in range(0,count,HEATMAP_ROW)]
         names=['%d月'%m if i==0 or m!=starts[i-1] else '' for i,m in enumerate(starts)]
     else:names=['30天' if key=='30d' else '%d月'%day.month]
-    return [(d.isoformat(),name(d),d>day.date()) for d in dates],(35 if key=='all' else count),names
+    return [(d.isoformat(),name(d),d>day.date()) for d in dates],(HEATMAP_ROW if key=='all' else count),names
 
 
 def heatmap_payload(bundle, key, now, selected, error=None):

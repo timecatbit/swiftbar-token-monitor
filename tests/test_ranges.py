@@ -183,8 +183,8 @@ class RangeTests(unittest.TestCase):
   # Thirty days and this month: a row of days.
   h=heat('30d');self.assertEqual((h['columns'],len(h['tokens']),h['labels'][0],h['tokens'][-2:],h['hint'],h['rowLabels']),(30,30,'10月6日 Tue',[100,700],'每格 1 天',['30天']))
   h=heat('month');self.assertEqual((h['columns'],len(h['tokens']),h['future'],h['labels'][0],h['rowLabels']),(30,30,26,'11月1日 Sun',['11月']))
-  # 全部: rows of 35 days back to the first day used within the last 175.
-  h=heat('all');self.assertEqual((h['columns'],len(h['tokens']),h['labels'][0],h['labels'][-1],h['rowLabels']),(35,35,'10月1日 Thu','11月4日 Wed',['10月']))
+  # 全部: rows of 30 days back to the first day used within the last 180.
+  h=heat('all');self.assertEqual((h['columns'],len(h['tokens']),h['labels'][0],h['labels'][-1],h['rowLabels']),(30,30,'10月6日 Tue','11月4日 Wed',['10月']))
   self.assertEqual(sum(h['tokens']),800)
   # A source whose hours couldn't be read leaves the squares short, and says so.
   self.m.preferences.write(self.m.STATE_DIR,dict(self.m.view_settings(),visible=['summary','heatmap','magpie','codex','claude']))

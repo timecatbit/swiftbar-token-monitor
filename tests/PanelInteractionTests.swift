@@ -241,7 +241,7 @@ expect(DashboardView.heatmapCaption(week,pointed:nil)==nil,"With nothing to say,
 var withoutHeatmap=grouped;withoutHeatmap.showSummary=true
 var heatData=withoutHeatmap;heatData.heatmap=week
 let heatGrid=DashboardView.heatmapGrid(heatData,width:344)
-expect(abs(heatGrid.minX-12-DashboardView.labelColumn(heatData))<0.01 && abs(heatGrid.maxX-332)<0.01,"The squares start after the shared label column and reach the right edge")
+expect(abs(heatGrid.minX-12-DashboardView.labelColumn(heatData))<0.01 && abs(heatGrid.maxX+6*DashboardView.heatmapPitch(heatData)-332)<0.01,"The squares start after the shared label column; a row of hours leaves six squares' room for its total")
 let axisWidth=DashboardView.chartAxis(heatData).labels.map{ceil(($0 as NSString).size(withAttributes:[.font:DashboardView.axisFont]).width)}.max() ?? 0
 let rowWidth=(week.rowLabels ?? []).map{ceil(($0 as NSString).size(withAttributes:[.font:DashboardView.rowFont]).width)}.max() ?? 0
 expect(DashboardView.labelColumn(heatData)==max(axisWidth,rowWidth)+10,"The chart's axis labels and the heatmap's row names share one column")
@@ -254,9 +254,11 @@ expect(DashboardView.heatmapIndex(at:centre(156),week,grid:heatGrid,pitch:Dashbo
 expect(DashboardView.heatmapIndex(at:centre(156),heatData,width:344)==156 && DashboardView.heatmapIndex(at:centre(24),heatData,width:344)==24,"Each square is the hour it stands for, a day to a row")
 expect(DashboardView.heatmapIndex(at:centre(160),heatData,width:344)==nil && DashboardView.heatmapIndex(at:NSPoint(x:heatGrid.midX,y:heatGrid.maxY+6),heatData,width:344)==nil,"Squares still to come and points outside read nothing")
 var hours=heatData;hours.heatmap=heat([Double](repeating:1,count:24),columns:24,future:0)
-var days=heatData;days.heatmap=heat([Double](repeating:1,count:35),columns:35,future:0)
-expect(DashboardView.heatmapPitch(hours)>DashboardView.heatmapPitch(days) && abs(DashboardView.heatmapGrid(days,width:344).maxX-332)<0.01,"A row of hours has larger squares than a row of days; both reach the right edge")
-expect(DashboardView.heatmapHeight(hours)<36 && DashboardView.heatmapHeight(days)<36 && DashboardView.heatmapHeight(heatData)<120,"One row stays short, a week of hours under 120pt")
+var days=heatData;days.heatmap=heat([Double](repeating:1,count:30),columns:30,future:0)
+expect(abs(DashboardView.heatmapPitch(hours)-DashboardView.heatmapPitch(days))<0.01,"Every range keeps one square size")
+expect(abs(DashboardView.heatmapGrid(days,width:344).maxX-332)<0.01 && 332-DashboardView.heatmapGrid(hours,width:344).maxX>5*DashboardView.heatmapPitch(hours),"A row of days fills the width; a row of hours leaves room for its total")
+expect(hours.heatmap!.rowTotals==[24] && week.rowTotals.count==7 && week.rowTotals[6]==45,"Each row of hours totals its tokens so far, not the hours still to come")
+expect(DashboardView.heatmapHeight(hours)<34 && DashboardView.heatmapHeight(days)<34 && DashboardView.heatmapHeight(heatData)<100,"One row stays short, a week of hours under 100pt")
 for style in ShareCard.Style.allCases {
     expect(ShareCard.make(style,heatData,project:Project(name:"Token Monitor",url:"https://example.com")).frame.height>ShareCard.make(style,withoutHeatmap,project:Project(name:"Token Monitor",url:"https://example.com")).frame.height,"The share picture carries the heatmap: "+style.title)
 }
