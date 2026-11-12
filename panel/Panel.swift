@@ -1082,9 +1082,9 @@ final class DashboardView:FlippedView {
         // right after the widest of them, and the note and last time label flush right.
         let axis=[CGFloat(0),0.5,1].map{axisTokens(ceiling*Double($0))},axisFont=NSFont.monospacedDigitSystemFont(ofSize:8,weight:.regular)
         let axisWidth=axis.map{ceil(($0 as NSString).size(withAttributes:[.font:axisFont]).width)}.max() ?? 0
-        let cardFrame=NSRect(x:left+axisWidth+5,y:119,width:right-left-axisWidth-5,height:90),card=NSBezierPath(roundedRect:cardFrame,xRadius:7,yRadius:7)
+        // The plot has no backdrop of its own, so it sits as lightly as the squares below it.
+        let cardFrame=NSRect(x:left+axisWidth+5,y:119,width:right-left-axisWidth-5,height:90)
         let plot=NSRect(x:cardFrame.minX+5,y:127,width:cardFrame.width-9,height:78)
-        totalColor.withAlphaComponent(dark(self) ? 0.035 : 0.025).setFill();card.fill()
         for (f,label) in zip([CGFloat(0),0.5,1],axis){
             let yy=plot.maxY-f*plot.height
             text(label,x:left,y:yy-5,w:axisWidth+1,size:8,color:.secondaryLabelColor,numeric:true)
