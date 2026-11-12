@@ -173,12 +173,13 @@ class RangeTests(unittest.TestCase):
   h=heat('today')
   self.assertEqual((h['columns'],len(h['tokens']),h['future'],h['hint']),(24,24,11,'每格 1 小时'))
   self.assertEqual(h['tokens'][9:12],[200,500,100]);self.assertEqual((h['requests'][10],h['costs'][10],h['unpriced'][10]),(2,1.5,1))
-  self.assertEqual(h['labels'][0],'11月4日 周三 00:00');self.assertEqual(h['figures'],'活跃 3 小时 · 连续 3 小时 · 最长 3 小时')
+  self.assertEqual((h['labels'][0],h['notice']),('11月4日 周三 00:00',''))
   h=heat('24h');self.assertEqual((h['labels'][0],h['labels'][-1],h['future']),('11月3日 周二 13:00','11月4日 周三 12:00',0))
   # A week: a row of hours per day.
-  h=heat('7d');self.assertEqual((h['columns'],len(h['tokens']),h['future'],h['labels'][0],h['hint']),(24,168,11,'10月29日 周四 00:00','每行 1 天 · 每格 1 小时'))
+  h=heat('7d');self.assertEqual((h['columns'],len(h['tokens']),h['future'],h['labels'][0],h['hint']),(24,168,11,'10月29日 周四 00:00','每格 1 小时'))
   self.assertEqual(h['tokens'][6*24+10],500)
-  h=heat('week');self.assertEqual((len(h['tokens']),h['future'],h['labels'][0],h['tokens'][2*24+10]),(168,107,'11月2日 周一 00:00',500))
+  # This week only up to today: Monday to Wednesday.
+  h=heat('week');self.assertEqual((len(h['tokens']),h['future'],h['labels'][0],h['tokens'][2*24+10]),(72,11,'11月2日 周一 00:00',500))
   # Thirty days and this month: a row of days.
   h=heat('30d');self.assertEqual((h['columns'],len(h['tokens']),h['labels'][0],h['tokens'][-2:],h['hint']),(30,30,'10月6日 周二',[100,700],'每格 1 天'))
   h=heat('month');self.assertEqual((h['columns'],len(h['tokens']),h['future'],h['labels'][0]),(30,30,26,'11月1日 周日'))
@@ -187,7 +188,7 @@ class RangeTests(unittest.TestCase):
   self.assertEqual(sum(h['tokens']),800)
   # A source whose hours couldn't be read leaves the squares short, and says so.
   self.m.preferences.write(self.m.STATE_DIR,dict(self.m.view_settings(),visible=['summary','heatmap','magpie','codex','claude']))
-  self.assertEqual(heat('7d',claude={'summary':{'requests':1,'totalTokens':10}})['hint'],'每行 1 天 · 每格 1 小时 · 部分小时数据不可用')
+  h=heat('7d',claude={'summary':{'requests':1,'totalTokens':10}});self.assertEqual((h['hint'],h['notice']),('每格 1 小时','部分小时数据不可用'))
   with patch.object(self.m,'usage_now',return_value=self.now):
    self.assertEqual(self.m.dashboard_payload({'displayed_range':'today'})['heatmap']['status'],'待同步')
    self.m.preferences.write(self.m.STATE_DIR,dict(self.m.view_settings(),visible=['summary','magpie']))

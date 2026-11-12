@@ -222,10 +222,10 @@ expect(DashboardView.clientLine(gateway)==nil,"A card without data names no clie
 // The usage heatmap: a week of hours, seven rows of 24, the last 11 hours still to come.
 func heat(_ tokens:[Double],columns:Int,future:Int)->UsageHeatmap {
     UsageHeatmap(columns:columns,labels:tokens.indices.map{"第 \($0) 格"},tokens:tokens,requests:tokens.map{$0>0 ? 1 : 0},costs:tokens.map{_ in 0},unpriced:tokens.map{_ in 0},
-                 future:future,figures:"活跃 7 小时 · 连续 2 小时 · 最长 4 小时",hint:"每行 1 天 · 每格 1 小时",status:"")
+                 future:future,hint:"每格 1 小时",status:"",notice:"")
 }
 var week=heat([Double](repeating:0,count:168),columns:24,future:11)
-expect(week.rows==7 && week.past==157 && week.note=="暂无用量","Nothing used yet says so in the bubble")
+expect(week.rows==7 && week.past==157 && week.note=="暂无用量","Nothing used yet says so under the squares")
 for (i,v) in [(100,10.0),(101,20),(102,30),(103,40),(155,5),(156,40)] {week.tokens[i]=v;week.requests[i]=1}
 week.requests[60]=3
 expect(week.levels[156]==4 && week.levels[103]==4 && week.levels[102]==3 && week.levels[100]==2 && week.levels[155]==1,"Shades go by rank, and the busiest square is the darkest")
@@ -233,8 +233,11 @@ expect(week.levels[60]==1 && week.levels[0]==0 && week.note==nil,"Requests witho
 week.costs[156]=0.25;week.unpriced[156]=1;week.requests[156]=2
 expect(week.detail(156)=="第 156 格 · 40 Token · 已知 $0.25 · 2 请求" && week.detail(1)=="第 1 格 · 无用量","Pointing at a square reads it out")
 week.status="待同步"
-expect(week.note=="待同步","Before the first read the bubble says so")
-week.status=""
+expect(week.note=="待同步","Before the first read the line under the squares says so")
+week.status="";week.notice="部分小时数据不可用"
+expect(DashboardView.heatmapCaption(week,pointed:nil)=="部分小时数据不可用" && DashboardView.heatmapCaption(week,pointed:156)==week.detail(156),"The line under the squares reads out the square pointed at, or what is missing")
+week.notice=""
+expect(DashboardView.heatmapCaption(week,pointed:nil)==nil,"With nothing to say, the line under the squares holds only the unit")
 var withoutHeatmap=grouped;withoutHeatmap.showSummary=true
 var heatData=withoutHeatmap;heatData.heatmap=week
 let heatGrid=DashboardView.heatmapGrid(heatData,width:344)
@@ -248,8 +251,6 @@ var hours=heatData;hours.heatmap=heat([Double](repeating:1,count:24),columns:24,
 var days=heatData;days.heatmap=heat([Double](repeating:1,count:35),columns:35,future:0)
 expect(DashboardView.heatmapPitch(hours.heatmap!)>DashboardView.heatmapPitch(days.heatmap!) && abs(DashboardView.heatmapGrid(days,width:344).maxX-332)<0.01,"A row of hours has larger squares than a row of days; both reach the right edge")
 expect(DashboardView.heatmapHeight(hours)<36 && DashboardView.heatmapHeight(days)<36 && DashboardView.heatmapHeight(heatData)<120,"One row stays short, a week of hours under 120pt")
-let bubble=DashboardView.heatmapBubble(heatData,width:344,index:156,size:NSSize(width:300,height:38)),square=DashboardView.heatmapCell(heatData,width:344,index:156)
-expect(bubble.minX>=8 && bubble.maxX<=336 && bubble.maxY<=square.minY-6,"A square's bubble sits above it, inside the dashboard")
 for style in ShareCard.Style.allCases {
     expect(ShareCard.make(style,heatData,project:Project(name:"Token Monitor",url:"https://example.com")).frame.height>ShareCard.make(style,withoutHeatmap,project:Project(name:"Token Monitor",url:"https://example.com")).frame.height,"The share picture carries the heatmap: "+style.title)
 }

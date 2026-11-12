@@ -3197,8 +3197,8 @@ WEEKDAYS='一二三四五六日'
 
 def heatmap_cells(key, now, used):
     """The heatmap's squares for a range, in reading order, as (key into the figures, label, still to come).
-    Today and 24 hours are a row of hours, 7 days and this week a row of hours per day, 30 days and this
-    month a row of days, and 全部 rows of 35 days, as many as reach back to the first day used."""
+    Today and 24 hours are a row of hours, 7 days and this week a row of hours per day (this week only up to
+    today), 30 days and this month a row of days, and 全部 rows of 35 days, as many as reach back to the first day used."""
     zone=now.tzinfo;day=now.replace(hour=0,minute=0,second=0,microsecond=0)
     def name(d):return '%d月%d日 周%s'%(d.month,d.day,WEEKDAYS[d.weekday()])
     if key in HOURLY_RANGES:
@@ -3208,7 +3208,8 @@ def heatmap_cells(key, now, used):
         else:
             first=day-timedelta(days={'today':0,'7d':6,'week':day.weekday()}[key])
             # Each row is one local day of wall-clock hours.
-            moments=[(first+timedelta(days=d)).replace(hour=h) for d in range(1 if key=='today' else 7) for h in range(24)]
+            rows={'today':1,'7d':7,'week':day.weekday()+1}[key]
+            moments=[(first+timedelta(days=d)).replace(hour=h) for d in range(rows) for h in range(24)]
         return [(int(m.timestamp())//3600*3600,name(m)+' %02d:00'%m.hour,m>now) for m in moments],24
     if key=='30d':first,count=day-timedelta(days=29),30
     elif key=='month':first,count=day.replace(day=1),calendar.monthrange(day.year,day.month)[1]
@@ -3237,20 +3238,10 @@ def heatmap_payload(bundle, key, now, selected, error=None):
     used=[slot for slot,t in totals.items() if t[0]>0 or t[1]>0] if not hourly else []
     cells,columns=heatmap_cells(key,now,used)
     values=[totals.get(slot,[0.0,0,0.0,0]) for slot,_,_ in cells]
-    future=sum(1 for _,_,later in cells if later)
-    # Active squares, the run up to now (or up to the square before, until it is used) and the longest run.
-    shown=[t[0]>0 or t[1]>0 for t in values[:len(values)-future]];run=longest=0
-    for flag in shown:run=run+1 if flag else 0;longest=max(longest,run)
-    current=0;index=len(shown)-1
-    if index>=0 and not shown[index]:index-=1
-    while index>=0 and shown[index]:current+=1;index-=1
-    unit='小时' if hourly else '天'
-    hint={True:'每格 1 小时',False:'每格 1 天'}[hourly] if key not in ('7d','week') else '每行 1 天 · 每格 1 小时'
     status='' if bundle else ('数据暂不可用' if refresh_failed(error) else '待同步')
     return {'columns':columns,'labels':[label for _,label,_ in cells],'tokens':[t[0] for t in values],'requests':[t[1] for t in values],
-            'costs':[round(t[2],6) for t in values],'unpriced':[t[3] for t in values],'future':future,'status':status,
-            'figures':'活跃 %d %s · 连续 %d %s · 最长 %d %s'%(sum(shown),unit,current,unit,longest,unit),
-            'hint':hint+(' · 部分小时数据不可用' if partial else '')}
+            'costs':[round(t[2],6) for t in values],'unpriced':[t[3] for t in values],'future':sum(1 for _,_,later in cells if later),
+            'status':status,'notice':'部分小时数据不可用' if partial else '','hint':'每格 1 小时' if hourly else '每格 1 天'}
 
 
 def dashboard_payload(data):

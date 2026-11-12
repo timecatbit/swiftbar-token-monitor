@@ -29,7 +29,7 @@ struct ProviderUsage:Decodable {
 // a day, a row of hours per day for a week, and days otherwise. The last `future` squares are still to come.
 struct UsageHeatmap:Decodable {
     var columns:Int;var labels:[String];var tokens:[Double];var requests:[Int];var costs:[Double];var unpriced:[Int]
-    var future:Int;var figures:String;var hint:String;var status:String?
+    var future:Int;var hint:String;var status:String?;var notice:String?
     var rows:Int {max(1,(tokens.count+max(1,columns)-1)/max(1,columns))}
     var past:Int {max(0,tokens.count-future)}
     var active:[Bool] {tokens.indices.map{tokens[$0]>0 || (requests.indices.contains($0) && requests[$0]>0)}}
@@ -57,10 +57,11 @@ struct UsageHeatmap:Decodable {
         parts.append("\(n) 请求")
         return parts.joined(separator:" · ")
     }
-    // The bubble's second line: why there's nothing yet, or else the figures.
+    // Said at the bottom left while no square is pointed at: why there's nothing yet, or what is missing.
     var note:String? {
         if let status,!status.isEmpty {return status}
-        return active.contains(true) ? nil : "暂无用量"
+        if !active.contains(true) {return "暂无用量"}
+        return (notice ?? "").isEmpty ? nil : notice
     }
 }
 struct Dashboard:Decodable {var date:String;var dates:[String];var providers:[ProviderUsage];var rangeKey:String;var rangeLabel:String;var chartUnit:String;var chartSpan:String;var period:[String]?;var chartStatus:String;var updated:String?;var chartPositions:[Double]?;var heatmap:UsageHeatmap?;var showSummary:Bool?;var allowCollapse:Bool?;var expandedProviders:[String]?}
@@ -805,7 +806,7 @@ final class DashboardView:FlippedView {
     // right. The dashboard is always 344pt wide, so a row of 24 hours has larger squares than a row of 35 days.
     static let heatmapGap:CGFloat=1.6
     static func heatmapPitch(_ h:UsageHeatmap)->CGFloat {(344-24+heatmapGap)/CGFloat(max(1,h.columns))}
-    static func heatmapHeight(_ d:Dashboard)->CGFloat {d.heatmap.map{8+CGFloat($0.rows)*heatmapPitch($0)-heatmapGap+13} ?? 0}
+    static func heatmapHeight(_ d:Dashboard)->CGFloat {d.heatmap.map{8+CGFloat($0.rows)*heatmapPitch($0)-heatmapGap+15} ?? 0}
     static func heatmapGrid(_ d:Dashboard,width:CGFloat)->NSRect {
         guard let h=d.heatmap else{return .zero}
         let pitch=heatmapPitch(h)
@@ -824,11 +825,8 @@ final class DashboardView:FlippedView {
         let index=min(h.rows-1,max(0,Int((point.y-grid.minY)/pitch)))*h.columns+min(h.columns-1,max(0,Int((point.x-grid.minX)/pitch)))
         return index<h.past ? index : nil
     }
-    // Where a square's bubble goes: centred over it and kept inside the dashboard, below it at the very top.
-    static func heatmapBubble(_ d:Dashboard,width:CGFloat,index:Int,size:NSSize)->NSRect {
-        let cell=heatmapCell(d,width:width,index:index),x=min(max(8,cell.midX-size.width/2),width-8-size.width),above=cell.minY-6-size.height
-        return NSRect(x:x,y:above>=2 ? above : cell.maxY+6,width:size.width,height:size.height)
-    }
+    // The line under the squares: the square pointed at (or why there's nothing yet) on the left, its length on the right.
+    static func heatmapCaption(_ h:UsageHeatmap,pointed:Int?)->String? {pointed.map{h.detail($0)} ?? h.note}
     static func heading(_ d:Dashboard)->String {d.showSummary==false ? "Harness 用量" : "Summary"}
     // The heading ends clear of the buttons beside it; the leftmost one (自动检测) starts 209pt from the right.
     static func headingWidth(_ width:CGFloat)->CGFloat {width-209-18}
@@ -850,7 +848,7 @@ final class DashboardView:FlippedView {
 
     required init?(coder:NSCoder){fatalError()}
     override func viewDidChangeEffectiveAppearance(){super.viewDidChangeEffectiveAppearance();needsDisplay=true}
-    // Pointing at a day shows a bubble with it and the figures.
+    // Pointing at a square reads it out on the line under the squares.
     override func updateTrackingAreas(){
         super.updateTrackingAreas()
         if let heatmapTracking{removeTrackingArea(heatmapTracking)}
@@ -862,10 +860,9 @@ final class DashboardView:FlippedView {
     override func mouseMoved(with event:NSEvent){hoverDay(Self.heatmapIndex(at:convert(event.locationInWindow,from:nil),data,width:bounds.width))}
     override func mouseEntered(with event:NSEvent){mouseMoved(with:event)}
     override func mouseExited(with event:NSEvent){hoverDay(nil)}
-    // The bubble can reach above the heatmap, so the whole dashboard is redrawn when the square changes.
     private func hoverDay(_ day:Int?){
         guard day != hoveredDay else{return}
-        hoveredDay=day;needsDisplay=true
+        hoveredDay=day;setNeedsDisplay(NSRect(x:0,y:Self.summaryHeight(data),width:bounds.width,height:Self.heatmapHeight(data)))
     }
     override func draw(_ dirtyRect:NSRect){
         let left:CGFloat=12,right=bounds.width-12,width=right-left
@@ -885,17 +882,6 @@ final class DashboardView:FlippedView {
         if let heatmap=data.heatmap {drawHeatmap(heatmap,left:left,right:right);y+=Self.heatmapHeight(data)}
         y+=Self.harnessHeaderHeight(data)
         for p in data.providers {if data.allowCollapse==true{drawCollapsibleProvider(p,y:y,left:left,right:right)}else{drawProvider(p,y:y,left:left,right:right)};y+=Self.providerHeight(p,data)}
-        if let heatmap=data.heatmap,let index=hoveredDay {drawBubble(heatmap,index:index)}
-    }
-    // Styled like the buttons' hints: the panel's own background, a hairline edge and rounded corners.
-    private func drawBubble(_ h:UsageHeatmap,index:Int){
-        let lines=[h.detail(index),h.note ?? h.figures],fonts=[NSFont.systemFont(ofSize:11,weight:.medium),NSFont.systemFont(ofSize:10)]
-        let textWidth=zip(lines,fonts).map{ceil(($0 as NSString).size(withAttributes:[.font:$1]).width)}.max() ?? 0
-        let frame=Self.heatmapBubble(data,width:bounds.width,index:index,size:NSSize(width:min(bounds.width-16,textWidth+24),height:38))
-        let shape=NSBezierPath(roundedRect:frame,xRadius:6,yRadius:6)
-        background(self).setFill();shape.fill();NSColor.separatorColor.setStroke();shape.lineWidth=0.5;shape.stroke()
-        text(lines[0],x:frame.minX+12,y:frame.minY+4,w:frame.width-24,size:11,weight:.medium,align:.center)
-        text(lines[1],x:frame.minX+12,y:frame.minY+20,w:frame.width-24,size:10,color:.secondaryLabelColor,align:.center)
     }
     static func heatmapShades(_ view:NSView)->[NSColor] {
         let total=totalColor(view)
@@ -916,7 +902,9 @@ final class DashboardView:FlippedView {
                 NSColor.labelColor.withAlphaComponent(0.6).setStroke();ring.stroke()
             }
         }
-        text(h.hint,x:left,y:Self.heatmapGrid(data,width:bounds.width).maxY+1,w:right-left,size:7.5,color:.tertiaryLabelColor,align:.right)
+        let line=Self.heatmapGrid(data,width:bounds.width).maxY+2,hintWidth=ceil((h.hint as NSString).size(withAttributes:[.font:NSFont.systemFont(ofSize:7.5)]).width)
+        text(h.hint,x:right-hintWidth-2,y:line+1,w:hintWidth+2,size:7.5,color:.tertiaryLabelColor,align:.right)
+        if let caption=Self.heatmapCaption(h,pointed:hoveredDay) {text(caption,x:left,y:line,w:right-left-hintWidth-10,size:9,color:.secondaryLabelColor)}
     }
     // Normal states say nothing; the slot shows a problem, or a note that changes how to read the numbers.
     static func note(_ p:ProviderUsage)->(String,Bool)? {

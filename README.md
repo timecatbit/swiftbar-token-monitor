@@ -63,7 +63,7 @@ python3 scripts/install.py
 - **左键星星**打开主页。Summary 旁边依次是自动检测（放大镜图标）、分享和刷新按钮，鼠标停上去会显示名称；把鼠标停在一行上，会在旁边展开详情和操作。
 - **Magpie**：读取本机网关的 `usage.jsonl`（默认 `~/.config/magpie`，也支持 `XDG_CONFIG_HOME` 或手选目录），只统计网关最终有用量的请求，不读 Key，也不要求 Magpie 正在运行。同时勾选 Magpie 和经过它的 Harness（如 ChatGPT、Claude）时，经过 Magpie 的请求只按 Magpie 计入 Summary，Harness 卡片照常显示自己的记录并注明“N 次已由 Magpie 计入”；没经过 Magpie 的请求仍由 Harness 计入。OpenCodex 同理。Magpie 卡片还会写出各客户端的占比（如“客户端 · ChatGPT 62% · Claude Code 30%”）；只想看网关总账时，主页只勾 Magpie 即可。费用是按已知价格的估算。
 - **DeepSeek Harness**：默认读取 `~/.dsh/sessions`。如果设置了 `DSH_HOME`，读取其 `sessions` 子目录；也可手选记录目录。通过 Magpie 调用 DeepSeek 模型的用量在 Magpie 卡片中查看。
-- **用量热力图**在 Summary 下方，跟着统计范围变：今日和近 24 小时每格 1 小时，近 7 天和本周每行一天、每格 1 小时，近 30 天、本月和全部每格 1 天；颜色越深用得越多，右下角写着单位。鼠标停在某格会显示那段时间的 Token、费用和请求数，分享图里也会带上。不需要时可在主页模块里关闭。
+- **用量热力图**在 Summary 下方，跟着统计范围变：今日和近 24 小时每格 1 小时，近 7 天和本周（从周一到今天）每行一天、每格 1 小时，近 30 天、本月和全部每格 1 天；颜色越深用得越多，右下角写着每格多久。鼠标停在某格时左下角显示那段时间的 Token、费用和请求数，分享图里也会带上。不需要时可在主页模块里关闭。
 - **右键星星 → 主页模块…** 选择要显示的模块，并设置记录目录、Key 和连接。
 - **自动检测**（主页按钮或右键星星）按本机已安装的工具重新勾选模块，会先列出将启用和取消的模块，确认前不会改动任何设置。
 - 不常用的设置写在 `~/Library/Application Support/SwiftBarToken/config.local.sh`，可用的变量见 [config.example.sh](config.example.sh)。如果命令行工具只在终端初始化时加入 PATH（例如通过 nvm 安装），可在这个文件里把对应的 `bin` 目录加进 PATH。
