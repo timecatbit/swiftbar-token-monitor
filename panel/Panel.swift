@@ -248,6 +248,14 @@ class ShareCard:FlippedView {
     var counted:[ProviderUsage] {rows.compactMap{$0.summaryPart}}
     var shared:[ProviderUsage] {counted.filter{$0.tokens>0}}
     var pictureHeight:CGFloat {0}
+    // A picture taller than a phone's screen fills it top to bottom when opened, so a notch or Dynamic Island
+    // and the home indicator cover its edges. Such pictures keep about 7.5% of their height clear above the
+    // content and 4.5% below; shorter ones are shown with bars above and below, and keep the plain margin.
+    static func phoneInsets(content:CGFloat,margin:CGFloat)->(top:CGFloat,bottom:CGFloat) {
+        guard (content+margin*2)/width>2 else{return (margin,margin)}
+        let total=content/(1-0.075-0.045)
+        return (max(margin,ceil(total*0.075)),max(margin,ceil(total*0.045)))
+    }
     // The heatmap as the panel shows it, once it has been read and something has been used.
     var heatmap:UsageHeatmap? {dashboard.heatmap.flatMap{($0.status ?? "").isEmpty && $0.active.contains(true) ? $0 : nil}}
     static let heatmapSquare:CGFloat=9
@@ -339,7 +347,8 @@ final class CardShareCard:ShareCard {
         let blocks=rows.isEmpty ? 0 : rows.reduce(0){$0+Self.blockHeight($1)+10}-10
         return Self.inset*2+header+hero+tiles+chart+heatmapHeight+share+blocks
     }
-    override var pictureHeight:CGFloat {Self.margin*2+cardHeight+60}
+    private var insets:(top:CGFloat,bottom:CGFloat) {Self.phoneInsets(content:cardHeight+60,margin:Self.margin)}
+    override var pictureHeight:CGFloat {insets.top+cardHeight+60+insets.bottom}
     private static let heatmapWidth=width-margin*2-inset*2
     private var heatmapHeight:CGFloat {heatmap.map{24+Self.heatmapGridHeight($0,width:Self.heatmapWidth)+24} ?? 0}
     static func day(_ iso:String)->String {
@@ -377,7 +386,7 @@ final class CardShareCard:ShareCard {
             let centre=NSPoint(x:bounds.width*fx,y:bounds.height*fy)
             NSGradient(starting:c.withAlphaComponent(isDark ? 0.26 : 0.20),ending:c.withAlphaComponent(0))?.draw(fromCenter:centre,radius:0,toCenter:centre,radius:bounds.width*fr,options:[])
         }
-        let card=NSRect(x:Self.margin,y:Self.margin,width:bounds.width-Self.margin*2,height:cardHeight),shape=NSBezierPath(roundedRect:card,xRadius:26,yRadius:26)
+        let card=NSRect(x:Self.margin,y:insets.top,width:bounds.width-Self.margin*2,height:cardHeight),shape=NSBezierPath(roundedRect:card,xRadius:26,yRadius:26)
         NSGraphicsContext.saveGraphicsState()
         let shadow=NSShadow();shadow.shadowColor=NSColor.black.withAlphaComponent(isDark ? 0.45 : 0.09);shadow.shadowBlurRadius=36;shadow.shadowOffset=NSSize(width:0,height:-12);shadow.set()
         (isDark ? NSColor(srgbRed:0.10,green:0.105,blue:0.115,alpha:1) : .white).setFill();shape.fill()
@@ -558,7 +567,8 @@ final class TerminalShareCard:ShareCard {
     }
     private static let heatmapWidth=width-margin*2-pad*2
     private var heatmapHeight:CGFloat {heatmap.map{24+Self.heatmapGridHeight($0,width:Self.heatmapWidth)+24} ?? 0}
-    override var pictureHeight:CGFloat {Self.margin*2+windowHeight+58}
+    private var insets:(top:CGFloat,bottom:CGFloat) {Self.phoneInsets(content:windowHeight+58,margin:Self.margin)}
+    override var pictureHeight:CGFloat {insets.top+windowHeight+58+insets.bottom}
     // What the picture covers, written as dates: today, a 24-hour window, or first to last day.
     static func span(_ d:Dashboard)->String {
         func numbers(_ value:String)->[Int] {value.split(whereSeparator:{"-T:".contains($0)}).compactMap{Int($0)}}
@@ -616,7 +626,7 @@ final class TerminalShareCard:ShareCard {
         let glow=NSPoint(x:bounds.width*0.15,y:60)
         NSGradient(starting:c.accent.withAlphaComponent(isDark ? 0.16 : 0.12),ending:c.accent.withAlphaComponent(0))?.draw(fromCenter:glow,radius:0,toCenter:glow,radius:bounds.width*0.9,options:[])
         // The window: title bar with its three lights, then the session.
-        let window=NSRect(x:Self.margin,y:Self.margin,width:bounds.width-Self.margin*2,height:windowHeight),shape=NSBezierPath(roundedRect:window,xRadius:12,yRadius:12)
+        let window=NSRect(x:Self.margin,y:insets.top,width:bounds.width-Self.margin*2,height:windowHeight),shape=NSBezierPath(roundedRect:window,xRadius:12,yRadius:12)
         NSGraphicsContext.saveGraphicsState()
         let shadow=NSShadow();shadow.shadowColor=NSColor.black.withAlphaComponent(isDark ? 0.55 : 0.14);shadow.shadowBlurRadius=34;shadow.shadowOffset=NSSize(width:0,height:-14);shadow.set()
         c.window.setFill();shape.fill()
