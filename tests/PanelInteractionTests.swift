@@ -231,7 +231,9 @@ expect(days.figures.map{$0.label+" "+$0.value}==["活跃 7 天","连续 2 天","
 days.requests[142]=0;days.tokens[142]=0
 expect(days.streaks.current==1,"Before today's first request the run counts up to yesterday")
 days.tokens[142]=40;days.requests[142]=2;days.costs[142]=0.25;days.unpriced[142]=1
-expect(days.detail(142)==["11月4日 周三","40 Token","已知 $0.25","2 请求"] && days.detail(1)==["6月16日 周二","无用量"],"Pointing at a day reads it out")
+let pointed=days.detail(142),idle=days.detail(1)
+expect(pointed.date=="11月4日 周三" && pointed.rows.map{$0.label+" "+$0.value}==["Token 40","费用 已知 $0.25","请求 2"],"Pointing at a day reads it out in the figures' rows")
+expect(idle.date=="6月16日 周二" && idle.rows.map{$0.value}==["0","—","0"],"An idle day reads as nothing used")
 expect(days.months.map{"\($0.week):\($0.label)"}==["1:10月","5:11月"],"Months are named over the shown week holding their first day")
 days.status="待同步"
 expect(days.note=="待同步","Before the first read the calendar says so")
@@ -247,7 +249,8 @@ expect(DashboardView.calendarDay(at:NSPoint(x:calendarGrid.minX+1,y:calendarGrid
 expect(DashboardView.calendarDay(at:NSPoint(x:calendarGrid.maxX-1,y:calendarGrid.minY+2.5*DashboardView.calendarPitch),calendarData,width:344)==142,"The last column holds this week")
 expect(DashboardView.calendarDay(at:NSPoint(x:calendarGrid.maxX-1,y:calendarGrid.maxY-1),calendarData,width:344)==nil && DashboardView.calendarDay(at:NSPoint(x:calendarGrid.minX-6,y:calendarGrid.minY),calendarData,width:344)==nil,"Days after today and points outside the grid read nothing")
 var longest=calendarData;longest.calendar!.requests[1]=1
-expect(DashboardView.calendarGrid(longest,width:344).minX-DashboardView.calendarDayColumn>=12+DashboardView.calendarTextWidth+6,"At its widest the grid stays clear of the figures")
+expect(DashboardView.calendarInfoRight(longest,width:344)-12>=DashboardView.calendarTextWidth,"At its widest the grid still leaves the figures room")
+expect(DashboardView.calendarInfoRight(calendarData,width:344)>DashboardView.calendarInfoRight(longest,width:344),"With fewer weeks the figures' rows reach further, leaving no hole")
 calendarData.allowCollapse=true
 let calendarFold=DashboardView(calendarData,width:344).subviews.compactMap{$0 as? DisclosureButton}.first!
 expect(calendarFold.frame.minY==DashboardView.summaryHeight(calendarData)+DashboardView.calendarHeight(calendarData)+DashboardView.harnessHeaderHeight(calendarData)+2,"Folded cards start below the calendar")

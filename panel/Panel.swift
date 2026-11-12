@@ -75,18 +75,13 @@ struct UsageCalendar:Decodable {
         if let date=day(firstShown),result.first.map({$0.week>=3}) ?? true {result.insert((0,"\(Self.calendar.component(.month,from:date))月"),at:0)}
         return result
     }
-    // The day pointed at: its date, then its tokens, known cost and requests.
-    func detail(_ index:Int)->[String] {
-        guard let date=day(index) else{return []}
+    // The day pointed at: its date, and its tokens, known cost and requests in the figures' rows.
+    func detail(_ index:Int)->(date:String,rows:[(label:String,value:String)]) {
+        guard let date=day(index) else{return ("",[])}
         let f=DateFormatter();f.calendar=Self.calendar;f.timeZone=Self.calendar.timeZone;f.locale=Locale(identifier:"zh_CN");f.dateFormat="M月d日 EEE"
-        let label=f.string(from:date),n=requests.indices.contains(index) ? requests[index] : 0
-        guard tokens.indices.contains(index),active[index] else{return [label,"无用量"]}
-        var lines=[label]
-        if tokens[index]>0 {lines.append(tokenText(tokens[index])+" Token")}
+        let used=tokens.indices.contains(index) ? tokens[index] : 0,n=requests.indices.contains(index) ? requests[index] : 0
         let cost=costs.indices.contains(index) ? costs[index] : 0,partial=unpriced.indices.contains(index) && unpriced[index]>0
-        if cost>0 {lines.append((partial ? "已知 " : "")+money(cost))}
-        lines.append("\(n) 请求")
-        return lines
+        return (f.string(from:date),[("Token",tokenText(used)),("费用",cost>0 ? (partial ? "已知 " : "")+money(cost) : "—"),("请求","\(n)")])
     }
     var figures:[(label:String,value:String)] {let s=streaks;return [("活跃","\(s.active) 天"),("连续","\(s.current) 天"),("最长","\(s.longest) 天")]}
     // Said in place of the figures before the first read, or when nothing has been used yet.
@@ -800,12 +795,14 @@ final class DashboardView:FlippedView {
     static func height(_ d:Dashboard)->CGFloat {summaryHeight(d)+calendarHeight(d)+harnessHeaderHeight(d)+d.providers.reduce(0){$0+providerHeight($1,d)}+(d.providers.isEmpty ? 0 : 4)}
     static func totalColor(_ view:NSView)->NSColor {dark(view) ? NSColor(srgbRed:0.43,green:0.79,blue:0.75,alpha:1) : NSColor(srgbRed:0.15,green:0.47,blue:0.46,alpha:1)}
     // The calendar sits under Summary: its figures on the left, the days on the right up to this week.
-    static let calendarPitch:CGFloat=9,calendarGap:CGFloat=1.5,calendarDayColumn:CGFloat=12,calendarTextWidth:CGFloat=108
+    static let calendarPitch:CGFloat=9,calendarGap:CGFloat=1.5,calendarDayColumn:CGFloat=12,calendarTextWidth:CGFloat=100
     static func calendarHeight(_ d:Dashboard)->CGFloat {d.calendar==nil ? 0 : 90}
     static func calendarGrid(_ d:Dashboard,width:CGFloat)->NSRect {
         let w=CGFloat(d.calendar?.shownWeeks ?? 0)*calendarPitch-calendarGap
         return NSRect(x:width-12-w,y:summaryHeight(d)+16,width:w,height:7*calendarPitch-calendarGap)
     }
+    // Where the figures' rows end: clear of the day names beside the grid.
+    static func calendarInfoRight(_ d:Dashboard,width:CGFloat)->CGFloat {calendarGrid(d,width:width).minX-calendarDayColumn-16}
     // The day under a point, or nil outside the grid and after today.
     static func calendarDay(at point:NSPoint,_ d:Dashboard,width:CGFloat)->Int? {
         guard let c=d.calendar else{return nil}
@@ -892,24 +889,22 @@ final class DashboardView:FlippedView {
                 }
             }
         }
-        // Beside the grid: the day pointed at, or the figures with the shade key along the grid's bottom edge.
-        let top=grid.minY-3,width=Self.calendarTextWidth
-        if let day=hoveredDay {
-            for (i,line) in c.detail(day).enumerated() {text(line,x:left,y:top+(i==0 ? 0 : 3)+CGFloat(i)*14,w:width,size:i==0 ? 11 : 10,color:i==0 ? .labelColor : .secondaryLabelColor,weight:i==0 ? .medium : .regular)}
-            return
+        // Beside the grid, rows reach from the left edge to the day names, label left and value right, so a short
+        // history leaves no hole. They hold the figures, or the day pointed at; the shade key, or that day's date,
+        // sits along the grid's bottom edge.
+        let top=grid.minY-3,infoRight=Self.calendarInfoRight(data,width:bounds.width),bottom=grid.maxY-cell
+        let pointed=hoveredDay.map{c.detail($0)},rows=pointed?.rows ?? (c.note==nil ? c.figures : [])
+        if pointed==nil,let note=c.note {text(note,x:left,y:top,w:infoRight-left,size:10,color:.secondaryLabelColor)}
+        for (i,row) in rows.enumerated() {
+            let y=top+CGFloat(i)*16
+            text(row.label,x:left,y:y+1.5,w:44,size:9.5,color:.secondaryLabelColor)
+            text(row.value,x:left+44,y:y,w:infoRight-left-44,size:11,weight:.medium,align:.right,numeric:true)
+            if i<rows.count-1 {line(NSPoint(x:left,y:y+15.5),NSPoint(x:infoRight,y:y+15.5),color:NSColor.separatorColor.withAlphaComponent(0.35),width:0.5)}
         }
-        if let note=c.note {text(note,x:left,y:top,w:width,size:10,color:.secondaryLabelColor)}
-        else {
-            for (i,figure) in c.figures.enumerated() {
-                let y=top+CGFloat(i)*16
-                text(figure.label,x:left,y:y+1.5,w:28,size:9.5,color:.secondaryLabelColor)
-                text(figure.value,x:left+28,y:y,w:width-28,size:11,weight:.medium,numeric:true)
-            }
-        }
-        let key=grid.maxY-cell
-        text("少",x:left,y:key-3,w:12,size:8,color:.secondaryLabelColor)
-        for (i,shade) in shades.enumerated() {shade.setFill();NSBezierPath(roundedRect:NSRect(x:left+12+CGFloat(i)*pitch,y:key,width:cell,height:cell),xRadius:1.6,yRadius:1.6).fill()}
-        text("多",x:left+14+5*pitch,y:key-3,w:12,size:8,color:.secondaryLabelColor)
+        if let pointed {text(pointed.date,x:left,y:bottom-4,w:infoRight-left,size:9.5,color:.secondaryLabelColor);return}
+        text("少",x:left,y:bottom-3,w:12,size:8,color:.secondaryLabelColor)
+        for (i,shade) in shades.enumerated() {shade.setFill();NSBezierPath(roundedRect:NSRect(x:left+12+CGFloat(i)*pitch,y:bottom,width:cell,height:cell),xRadius:1.6,yRadius:1.6).fill()}
+        text("多",x:left+14+5*pitch,y:bottom-3,w:12,size:8,color:.secondaryLabelColor)
     }
     // Normal states say nothing; the slot shows a problem, or a note that changes how to read the numbers.
     static func note(_ p:ProviderUsage)->(String,Bool)? {
