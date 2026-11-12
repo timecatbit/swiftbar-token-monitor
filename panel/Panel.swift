@@ -248,6 +248,37 @@ class ShareCard:FlippedView {
     var counted:[ProviderUsage] {rows.compactMap{$0.summaryPart}}
     var shared:[ProviderUsage] {counted.filter{$0.tokens>0}}
     var pictureHeight:CGFloat {0}
+    // A picture taller than a phone's screen fills it top to bottom when opened, so a notch or Dynamic Island
+    // covers the middle of its top and the home indicator its bottom edge. Such pictures keep 59/852 of their
+    // height above the content for a band of squares, so on an iPhone the island (11pt down, 37pt tall) has the
+    // same space below it as above, and 3.5% below; shorter ones are shown with bars above and below, and keep
+    // the plain margin.
+    static let phoneTop:CGFloat=59.0/852,phoneBottom:CGFloat=0.035
+    static func phoneInsets(content:CGFloat,margin:CGFloat)->(top:CGFloat,bottom:CGFloat) {
+        guard (content+margin*2)/width>2 else{return (margin,margin)}
+        let total=content/(1-phoneTop-phoneBottom)
+        return (max(margin,ceil(total*phoneTop)),max(margin,ceil(total*phoneBottom)))
+    }
+    // The band over the top of a tall picture: loose rows of squares in the picture's colours, clustered like
+    // a heatmap and fading out before the content, so whatever a phone's island covers there is only pattern.
+    func drawCrown(height:CGFloat,shades:[NSColor],accents:[NSColor]){
+        let size:CGFloat=9,pitch:CGFloat=12,columns=Int(ceil((bounds.width+pitch)/pitch)),rows=max(1,Int(height/pitch))
+        let start=(bounds.width-(CGFloat(columns)*pitch-(pitch-size)))/2,seed=Double(dashboard.date.unicodeScalars.reduce(0){$0+Int($1.value)}%97)
+        for row in 0..<rows {
+            let fade=pow(1-CGFloat(row)/CGFloat(rows),1.4)
+            for column in 0..<columns {
+                // A smooth wave plus a little grain, so the shades gather in patches rather than scatter evenly.
+                var grain=UInt32(truncatingIfNeeded:row&*73856093 ^ column&*19349663 ^ Int(seed)&*83492791)
+                grain ^= grain<<13;grain ^= grain>>17;grain ^= grain<<5
+                let c=Double(column),r=Double(row)
+                let value=0.5+0.28*sin(c*0.42+seed)+0.2*sin(r*0.9-c*0.23+seed*1.7)+0.32*(Double(grain%1000)/1000-0.5)
+                let level=value<0.42 ? 0 : value<0.6 ? 1 : value<0.74 ? 2 : value<0.86 ? 3 : 4
+                let colour=level==4 && !accents.isEmpty && grain%5==0 ? accents[Int(grain/5)%accents.count] : shades[level]
+                colour.withAlphaComponent(colour.alphaComponent*fade).setFill()
+                NSBezierPath(roundedRect:NSRect(x:start+CGFloat(column)*pitch,y:CGFloat(row)*pitch+4,width:size,height:size),xRadius:2,yRadius:2).fill()
+            }
+        }
+    }
     // The heatmap as the panel shows it, once it has been read and something has been used.
     var heatmap:UsageHeatmap? {dashboard.heatmap.flatMap{($0.status ?? "").isEmpty && $0.active.contains(true) ? $0 : nil}}
     static let heatmapSquare:CGFloat=9
@@ -339,7 +370,8 @@ final class CardShareCard:ShareCard {
         let blocks=rows.isEmpty ? 0 : rows.reduce(0){$0+Self.blockHeight($1)+10}-10
         return Self.inset*2+header+hero+tiles+chart+heatmapHeight+share+blocks
     }
-    override var pictureHeight:CGFloat {Self.margin*2+cardHeight+60}
+    private var insets:(top:CGFloat,bottom:CGFloat) {Self.phoneInsets(content:cardHeight+60,margin:Self.margin)}
+    override var pictureHeight:CGFloat {insets.top+cardHeight+60+insets.bottom}
     private static let heatmapWidth=width-margin*2-inset*2
     private var heatmapHeight:CGFloat {heatmap.map{24+Self.heatmapGridHeight($0,width:Self.heatmapWidth)+24} ?? 0}
     static func day(_ iso:String)->String {
@@ -377,7 +409,12 @@ final class CardShareCard:ShareCard {
             let centre=NSPoint(x:bounds.width*fx,y:bounds.height*fy)
             NSGradient(starting:c.withAlphaComponent(isDark ? 0.26 : 0.20),ending:c.withAlphaComponent(0))?.draw(fromCenter:centre,radius:0,toCenter:centre,radius:bounds.width*fr,options:[])
         }
-        let card=NSRect(x:Self.margin,y:Self.margin,width:bounds.width-Self.margin*2,height:cardHeight),shape=NSBezierPath(roundedRect:card,xRadius:26,yRadius:26)
+        if insets.top>Self.margin {
+            let total=dark(self) ? NSColor(srgbRed:0.43,green:0.79,blue:0.75,alpha:1) : NSColor(srgbRed:0.15,green:0.47,blue:0.46,alpha:1)
+            drawCrown(height:insets.top-10,shades:[NSColor.labelColor.withAlphaComponent(isDark ? 0.06 : 0.04)]+[0.18,0.32,0.5,0.72].map{total.withAlphaComponent($0)},
+                      accents:counted.sorted{$0.tokens>$1.tokens}.prefix(2).map{accent($0.id,self).withAlphaComponent(0.75)})
+        }
+        let card=NSRect(x:Self.margin,y:insets.top,width:bounds.width-Self.margin*2,height:cardHeight),shape=NSBezierPath(roundedRect:card,xRadius:26,yRadius:26)
         NSGraphicsContext.saveGraphicsState()
         let shadow=NSShadow();shadow.shadowColor=NSColor.black.withAlphaComponent(isDark ? 0.45 : 0.09);shadow.shadowBlurRadius=36;shadow.shadowOffset=NSSize(width:0,height:-12);shadow.set()
         (isDark ? NSColor(srgbRed:0.10,green:0.105,blue:0.115,alpha:1) : .white).setFill();shape.fill()
@@ -558,7 +595,8 @@ final class TerminalShareCard:ShareCard {
     }
     private static let heatmapWidth=width-margin*2-pad*2
     private var heatmapHeight:CGFloat {heatmap.map{24+Self.heatmapGridHeight($0,width:Self.heatmapWidth)+24} ?? 0}
-    override var pictureHeight:CGFloat {Self.margin*2+windowHeight+58}
+    private var insets:(top:CGFloat,bottom:CGFloat) {Self.phoneInsets(content:windowHeight+58,margin:Self.margin)}
+    override var pictureHeight:CGFloat {insets.top+windowHeight+58+insets.bottom}
     // What the picture covers, written as dates: today, a 24-hour window, or first to last day.
     static func span(_ d:Dashboard)->String {
         func numbers(_ value:String)->[Int] {value.split(whereSeparator:{"-T:".contains($0)}).compactMap{Int($0)}}
@@ -616,7 +654,11 @@ final class TerminalShareCard:ShareCard {
         let glow=NSPoint(x:bounds.width*0.15,y:60)
         NSGradient(starting:c.accent.withAlphaComponent(isDark ? 0.16 : 0.12),ending:c.accent.withAlphaComponent(0))?.draw(fromCenter:glow,radius:0,toCenter:glow,radius:bounds.width*0.9,options:[])
         // The window: title bar with its three lights, then the session.
-        let window=NSRect(x:Self.margin,y:Self.margin,width:bounds.width-Self.margin*2,height:windowHeight),shape=NSBezierPath(roundedRect:window,xRadius:12,yRadius:12)
+        if insets.top>Self.margin {
+            drawCrown(height:insets.top-10,shades:[c.rule]+[0.2,0.38,0.6,0.88].map{c.accent.withAlphaComponent($0)},
+                      accents:counted.sorted{$0.tokens>$1.tokens}.prefix(2).map{accent($0.id,self).withAlphaComponent(0.85)})
+        }
+        let window=NSRect(x:Self.margin,y:insets.top,width:bounds.width-Self.margin*2,height:windowHeight),shape=NSBezierPath(roundedRect:window,xRadius:12,yRadius:12)
         NSGraphicsContext.saveGraphicsState()
         let shadow=NSShadow();shadow.shadowColor=NSColor.black.withAlphaComponent(isDark ? 0.55 : 0.14);shadow.shadowBlurRadius=34;shadow.shadowOffset=NSSize(width:0,height:-14);shadow.set()
         c.window.setFill();shape.fill()
