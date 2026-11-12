@@ -257,25 +257,13 @@ class ShareCard:FlippedView {
     static func phoneInsets(content:CGFloat,margin:CGFloat)->(top:CGFloat,bottom:CGFloat) {
         (content+margin*2)/width>2 ? (max(margin,phoneTop),margin) : (margin,margin)
     }
-    // The band over the top of a tall picture: loose rows of squares in the picture's colours, clustered like
-    // a heatmap and fading out before the content, so whatever a phone's island covers there is only pattern.
-    func drawCrown(height:CGFloat,shades:[NSColor],accents:[NSColor]){
-        let size:CGFloat=9,pitch:CGFloat=12,columns=Int(ceil((bounds.width+pitch)/pitch)),rows=max(1,Int(height/pitch))
-        let start=(bounds.width-(CGFloat(columns)*pitch-(pitch-size)))/2,seed=Double(dashboard.date.unicodeScalars.reduce(0){$0+Int($1.value)}%97)
-        for row in 0..<rows {
-            let fade=pow(1-CGFloat(row)/CGFloat(rows),1.4)
-            for column in 0..<columns {
-                // A smooth wave plus a little grain, so the shades gather in patches rather than scatter evenly.
-                var grain=UInt32(truncatingIfNeeded:row&*73856093 ^ column&*19349663 ^ Int(seed)&*83492791)
-                grain ^= grain<<13;grain ^= grain>>17;grain ^= grain<<5
-                let c=Double(column),r=Double(row)
-                let value=0.5+0.28*sin(c*0.42+seed)+0.2*sin(r*0.9-c*0.23+seed*1.7)+0.32*(Double(grain%1000)/1000-0.5)
-                let level=value<0.42 ? 0 : value<0.6 ? 1 : value<0.74 ? 2 : value<0.86 ? 3 : 4
-                let colour=level==4 && !accents.isEmpty && grain%5==0 ? accents[Int(grain/5)%accents.count] : shades[level]
-                colour.withAlphaComponent(colour.alphaComponent*fade).setFill()
-                NSBezierPath(roundedRect:NSRect(x:start+CGFloat(column)*pitch,y:CGFloat(row)*pitch+4,width:size,height:size),xRadius:2,yRadius:2).fill()
-            }
-        }
+    // The band over the top of a tall picture holds only pattern, in the style's own colours, fading out before
+    // the content, so whatever a phone's island covers there hides nothing. Its grain is fixed per day.
+    var crownSeed:Double {Double(dashboard.date.unicodeScalars.reduce(0){$0+Int($1.value)}%97)}
+    static func grain(_ a:Int,_ b:Int,_ seed:Double)->UInt32 {
+        var value=UInt32(truncatingIfNeeded:a&*73856093 ^ b&*19349663 ^ Int(seed)&*83492791)
+        value ^= value<<13;value ^= value>>17;value ^= value<<5
+        return value
     }
     // The heatmap as the panel shows it, once it has been read and something has been used.
     var heatmap:UsageHeatmap? {dashboard.heatmap.flatMap{($0.status ?? "").isEmpty && $0.active.contains(true) ? $0 : nil}}
@@ -398,6 +386,22 @@ final class CardShareCard:ShareCard {
         return measured<=room ? full : font(max(11,floor(size*room/measured)),weight,rounded:true)
     }
     private var teal:NSColor {dark(self) ? NSColor(srgbRed:0.43,green:0.79,blue:0.75,alpha:1) : NSColor(srgbRed:0.15,green:0.47,blue:0.46,alpha:1)}
+    // The card's band: a halftone of soft dots swelling and shrinking in slow waves, fading toward the card.
+    private func drawHalftone(height:CGFloat,colour:NSColor){
+        let pitch:CGFloat=9,rows=max(1,Int(height/pitch)),columns=Int(bounds.width/pitch)+2,seed=crownSeed
+        for row in 0..<rows {
+            let fade=pow(1-CGFloat(row)/CGFloat(rows+1),0.8),y=CGFloat(row)*pitch+6
+            for column in 0..<columns {
+                let x=CGFloat(column)*pitch+(row%2==0 ? 0 : pitch/2)-2
+                // Diagonal swells that rise and fall slowly across the width.
+                let wave=0.5+0.5*sin(Double(x)*0.05-Double(row)*0.75+seed)*(0.65+0.35*cos(Double(x)*0.013-seed*0.7))
+                let radius=(0.7+3.3*CGFloat(wave))*fade
+                guard radius>0.5 else{continue}
+                colour.withAlphaComponent(colour.alphaComponent*(0.35+0.65*fade)).setFill()
+                NSBezierPath(ovalIn:NSRect(x:x-radius,y:y-radius,width:radius*2,height:radius*2)).fill()
+            }
+        }
+    }
     override func draw(_ dirtyRect:NSRect){
         let isDark=dark(self)
         // A soft wash lit by the colours of the tools that used the most.
@@ -407,11 +411,7 @@ final class CardShareCard:ShareCard {
             let centre=NSPoint(x:bounds.width*fx,y:bounds.height*fy)
             NSGradient(starting:c.withAlphaComponent(isDark ? 0.26 : 0.20),ending:c.withAlphaComponent(0))?.draw(fromCenter:centre,radius:0,toCenter:centre,radius:bounds.width*fr,options:[])
         }
-        if insets.top>Self.margin {
-            let total=dark(self) ? NSColor(srgbRed:0.43,green:0.79,blue:0.75,alpha:1) : NSColor(srgbRed:0.15,green:0.47,blue:0.46,alpha:1)
-            drawCrown(height:insets.top-10,shades:[NSColor.labelColor.withAlphaComponent(isDark ? 0.06 : 0.04)]+[0.18,0.32,0.5,0.72].map{total.withAlphaComponent($0)},
-                      accents:counted.sorted{$0.tokens>$1.tokens}.prefix(2).map{accent($0.id,self).withAlphaComponent(0.75)})
-        }
+        if insets.top>Self.margin {drawHalftone(height:insets.top-8,colour:teal.withAlphaComponent(isDark ? 0.6 : 0.5))}
         let card=NSRect(x:Self.margin,y:insets.top,width:bounds.width-Self.margin*2,height:cardHeight),shape=NSBezierPath(roundedRect:card,xRadius:26,yRadius:26)
         NSGraphicsContext.saveGraphicsState()
         let shadow=NSShadow();shadow.shadowColor=NSColor.black.withAlphaComponent(isDark ? 0.45 : 0.09);shadow.shadowBlurRadius=36;shadow.shadowOffset=NSSize(width:0,height:-12);shadow.set()
@@ -615,6 +615,23 @@ final class TerminalShareCard:ShareCard {
                              text:Self.rgb(0.11,0.13,0.15),muted:Self.rgb(0.36,0.40,0.44),comment:Self.rgb(0.52,0.56,0.60),accent:Self.rgb(0.02,0.54,0.46),rule:Self.rgb(0,0,0,0.09))
     }
     private func mono(_ size:CGFloat,_ weight:NSFont.Weight = .regular)->NSFont {NSFont.monospacedSystemFont(ofSize:size,weight:weight)}
+    // The terminal's band: columns of hex digits raining down, each led by a bright head with a fading trail.
+    private func drawRain(height:CGFloat,_ c:Palette){
+        let pitchX:CGFloat=10,pitchY:CGFloat=10,rows=max(1,Int(height/pitchY)),columns=Int(bounds.width/pitchX)+1,seed=crownSeed
+        let font=mono(8.5,.medium),digits=Array("0123456789abcdef")
+        for column in 0..<columns {
+            let head=Int(Self.grain(column,7,seed)%UInt32(rows+4))
+            for row in 0..<rows {
+                let grain=Self.grain(column,row,seed),behind=head-row
+                let fade=pow(1-CGFloat(row)/CGFloat(rows),1.1)
+                // The head is brightest; the trail above it dims; elsewhere a faint scatter of digits.
+                let strength:CGFloat=behind==0 ? 1 : (behind>0 && behind<5 ? 0.62-CGFloat(behind)*0.11 : (grain%3==0 ? 0.14 : 0))
+                guard strength>0 else{continue}
+                let colour=(behind==0 ? c.text : c.accent).withAlphaComponent(strength*fade)
+                draw(String(digits[Int(grain%16)]),NSRect(x:CGFloat(column)*pitchX+1,y:CGFloat(row)*pitchY,width:pitchX,height:pitchY+2),font,colour,.center)
+            }
+        }
+    }
     private func ui(_ size:CGFloat,_ weight:NSFont.Weight)->NSFont {NSFont.systemFont(ofSize:size,weight:weight)}
     // Large figures shrink to fit their slot rather than truncate.
     private func fitted(_ value:String,_ size:CGFloat,room:CGFloat)->NSFont {
@@ -652,10 +669,7 @@ final class TerminalShareCard:ShareCard {
         let glow=NSPoint(x:bounds.width*0.15,y:60)
         NSGradient(starting:c.accent.withAlphaComponent(isDark ? 0.16 : 0.12),ending:c.accent.withAlphaComponent(0))?.draw(fromCenter:glow,radius:0,toCenter:glow,radius:bounds.width*0.9,options:[])
         // The window: title bar with its three lights, then the session.
-        if insets.top>Self.margin {
-            drawCrown(height:insets.top-10,shades:[c.rule]+[0.2,0.38,0.6,0.88].map{c.accent.withAlphaComponent($0)},
-                      accents:counted.sorted{$0.tokens>$1.tokens}.prefix(2).map{accent($0.id,self).withAlphaComponent(0.85)})
-        }
+        if insets.top>Self.margin {drawRain(height:insets.top-8,c)}
         let window=NSRect(x:Self.margin,y:insets.top,width:bounds.width-Self.margin*2,height:windowHeight),shape=NSBezierPath(roundedRect:window,xRadius:12,yRadius:12)
         NSGraphicsContext.saveGraphicsState()
         let shadow=NSShadow();shadow.shadowColor=NSColor.black.withAlphaComponent(isDark ? 0.55 : 0.14);shadow.shadowBlurRadius=34;shadow.shadowOffset=NSSize(width:0,height:-14);shadow.set()
