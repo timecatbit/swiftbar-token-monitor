@@ -1709,8 +1709,12 @@ def qoder_subscription_lines(data):
 
 
 RANGES={'today':'当天','24h':'近 24 小时','7d':'近 7 天','30d':'近 30 天','week':'本周','month':'本月','all':'全部'}
-# The usage calendar reads whole weeks, Monday first: this one and the 20 before it.
-CALENDAR_WEEKS=21
+# The usage calendar reads whole months: this one and the five before it.
+CALENDAR_MONTHS=6
+
+def calendar_start(day):
+    for _ in range(CALENDAR_MONTHS-1):day=(day.replace(day=1)-timedelta(days=1))
+    return day.replace(day=1)
 
 def usage_now():
     from zoneinfo import ZoneInfo
@@ -1724,7 +1728,7 @@ def range_bounds(key,now=None):
     now=now or usage_now();day=now.replace(hour=0,minute=0,second=0,microsecond=0)
     start={'today':day,'24h':now-timedelta(hours=24),'7d':day-timedelta(days=6),
            '30d':day-timedelta(days=29),'week':day-timedelta(days=day.weekday()),
-           'month':day.replace(day=1),'calendar':day-timedelta(days=day.weekday()+7*(CALENDAR_WEEKS-1)),'all':None}[key]
+           'month':day.replace(day=1),'calendar':calendar_start(day),'all':None}[key]
     return (start.timestamp() if start else 0),now.timestamp()
 
 def range_options(key=None):

@@ -157,19 +157,20 @@ class RangeTests(unittest.TestCase):
   self.assertNotIn('clients',{k for k,v in next(r for r in d['providers'] if r['id']=='codex').items() if v})
 
  def test_calendar_counts_each_day_as_summary_does(self):
-  self.assertEqual(datetime.fromtimestamp(self.m.range_bounds('calendar',self.now)[0],self.now.tzinfo).date().isoformat(),'2026-06-15')
+  self.assertEqual(datetime.fromtimestamp(self.m.range_bounds('calendar',self.now)[0],self.now.tzinfo).date().isoformat(),'2026-06-01')
+  self.assertEqual(self.m.calendar_start(datetime(2026,3,31)).date().isoformat(),'2025-10-01')  # Across a year and a short month.
   self.m.preferences.write(self.m.STATE_DIR,dict(self.m.view_settings(),visible=['summary','calendar','magpie','codex']))
   day=lambda date,tokens,requests=1,cost=0,unpriced=0:{'date':date,'totalTokens':tokens,'requests':requests,'estimatedCostUsd':cost,'unpricedRequests':unpriced}
-  mp={'summary':{'requests':2,'totalTokens':300},'days':[day('2026-11-04',200,cost=1.5),day('2026-06-14',999)]}
+  mp={'summary':{'requests':2,'totalTokens':300},'days':[day('2026-11-04',200,cost=1.5),day('2026-05-31',999)]}
   # ChatGPT's card has 500 tokens on Nov 3, but Magpie carried 400 of them; Summary counts those once, from Magpie.
   codex={'summary':{'requests':3,'totalTokens':600},'carried':{'Magpie':1},'days':[day('2026-11-03',500,2),day('2026-11-04',100)],
          'counted':{'summary':{'requests':2,'totalTokens':200},'days':[day('2026-11-03',100,1,unpriced=1),day('2026-11-04',100)]}}
   with patch.object(self.m,'usage_now',return_value=self.now):
    c=self.m.dashboard_payload({'range_usage':{},'calendar_usage':{'range':'calendar','magpie':mp,'codex':codex}})['calendar']
-  self.assertEqual((c['start'],len(c['tokens']),c['status']),('2026-06-15',143,''))
+  self.assertEqual((c['start'],len(c['tokens']),c['status']),('2026-06-01',157,''))
   self.assertEqual(c['tokens'][-2:],[100,300]);self.assertEqual(c['requests'][-2:],[1,2])
   self.assertEqual(c['costs'][-1],1.5);self.assertEqual(c['unpriced'][-2:],[1,0])
-  self.assertEqual(sum(c['tokens']),400)  # The Sunday before the first week is outside.
+  self.assertEqual(sum(c['tokens']),400)  # The day before the first month is outside.
   with patch.object(self.m,'usage_now',return_value=self.now):
    self.assertEqual(self.m.dashboard_payload({})['calendar']['status'],'待同步')
    self.assertIn('calendar',self.m.usage_ranges_due())

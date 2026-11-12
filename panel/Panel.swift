@@ -25,11 +25,10 @@ struct ProviderUsage:Decodable {
         return part
     }
 }
-// Each day from a Monday 20 weeks back up to today, as Summary counts it.
+// Each day from the first of a month five months back up to today, as Summary counts it.
 struct UsageCalendar:Decodable {
     var start:String;var tokens:[Double];var requests:[Int];var costs:[Double];var unpriced:[Int];var status:String?
-    // The weeks read, and the fewest shown, so someone who just started still sees a month.
-    static let maxWeeks=21,minWeeks=4
+    static let maxMonths=6
     var active:[Bool] {tokens.indices.map{tokens[$0]>0 || (requests.indices.contains($0) && requests[$0]>0)}}
     // Four shades by rank among the days with tokens, so a few heavy days don't wash out the rest and the
     // busiest day is always the darkest. Days with requests but no tokens (Qoder CN Credits) take the lightest.
@@ -52,42 +51,41 @@ struct UsageCalendar:Decodable {
         while index>=0 && flags[index]{current+=1;index-=1}
         return (flags.filter{$0}.count,current,longest)
     }
-    // Weeks from the first one with any use up to this one: at least a month, never an empty stretch before.
-    var shownWeeks:Int {
-        let weeks=(tokens.count+6)/7
-        guard let first=active.firstIndex(of:true) else{return max(1,min(weeks,Self.minWeeks))}
-        return max(1,min(weeks,max(Self.minWeeks,weeks-first/7)))
-    }
-    var firstShown:Int {max(0,(tokens.count+6)/7-shownWeeks)*7}
     static let calendar:Calendar={var c=Calendar(identifier:.gregorian);c.timeZone=TimeZone(identifier:"UTC")!;return c}()
     var firstDay:Date? {let f=DateFormatter();f.calendar=Self.calendar;f.timeZone=Self.calendar.timeZone;f.dateFormat="yyyy-MM-dd";return f.date(from:start)}
     func day(_ index:Int)->Date? {firstDay.flatMap{Self.calendar.date(byAdding:.day,value:index,to:$0)}}
-    // A month is named over the shown week holding its first day; the first week's month only when there's room.
-    var months:[(week:Int,label:String)] {
-        guard firstDay != nil else{return []}
-        var result:[(week:Int,label:String)]=[]
-        for week in 0..<shownWeeks {
-            for row in 0..<7 {
-                guard let date=day(firstShown+week*7+row),Self.calendar.component(.day,from:date)==1 else{continue}
-                result.append((week,"\(Self.calendar.component(.month,from:date))月"))
-            }
+    // One row per month, from the first month with any use (this month when there's none) to this one:
+    // its name, the index of its first day and its length. A short history is a short calendar.
+    var rows:[(label:String,first:Int,length:Int)] {
+        guard let start=firstDay,!tokens.isEmpty else{return []}
+        var result:[(label:String,first:Int,length:Int)]=[],index=0
+        while index<tokens.count {
+            guard let date=Self.calendar.date(byAdding:.day,value:index,to:start),let days=Self.calendar.range(of:.day,in:.month,for:date) else{break}
+            let first=index-(Self.calendar.component(.day,from:date)-1)
+            result.append(("\(Self.calendar.component(.month,from:date))月",first,days.count));index=first+days.count
         }
-        if let date=day(firstShown),result.first.map({$0.week>=3}) ?? true {result.insert((0,"\(Self.calendar.component(.month,from:date))月"),at:0)}
-        return result
+        let used=active.firstIndex(of:true) ?? tokens.count-1
+        return Array(result.filter{$0.first+$0.length>used}.suffix(Self.maxMonths))
     }
-    // The day pointed at: its date, and its tokens, known cost and requests in the figures' rows.
-    func detail(_ index:Int)->(date:String,rows:[(label:String,value:String)]) {
-        guard let date=day(index) else{return ("",[])}
+    // The day pointed at, in one line: its date, tokens, known cost and requests.
+    func detail(_ index:Int)->String {
+        guard let date=day(index) else{return ""}
         let f=DateFormatter();f.calendar=Self.calendar;f.timeZone=Self.calendar.timeZone;f.locale=Locale(identifier:"zh_CN");f.dateFormat="M月d日 EEE"
-        let used=tokens.indices.contains(index) ? tokens[index] : 0,n=requests.indices.contains(index) ? requests[index] : 0
+        let label=f.string(from:date),n=requests.indices.contains(index) ? requests[index] : 0
+        guard tokens.indices.contains(index),active[index] else{return label+" · 无用量"}
+        var parts=[label]
+        if tokens[index]>0 {parts.append(tokenText(tokens[index])+" Token")}
         let cost=costs.indices.contains(index) ? costs[index] : 0,partial=unpriced.indices.contains(index) && unpriced[index]>0
-        return (f.string(from:date),[("Token",tokenText(used)),("费用",cost>0 ? (partial ? "已知 " : "")+money(cost) : "—"),("请求","\(n)")])
+        if cost>0 {parts.append((partial ? "已知 " : "")+money(cost))}
+        parts.append("\(n) 请求")
+        return parts.joined(separator:" · ")
     }
-    var figures:[(label:String,value:String)] {let s=streaks;return [("活跃","\(s.active) 天"),("连续","\(s.current) 天"),("最长","\(s.longest) 天")]}
-    // Said in place of the figures before the first read, or when nothing has been used yet.
-    var note:String? {
+    // The line under the calendar: why there's nothing yet, or the active days and runs.
+    var summary:String {
         if let status,!status.isEmpty {return status}
-        return active.contains(true) ? nil : "暂无用量"
+        let s=streaks
+        guard s.active>0 else{return "暂无用量"}
+        return "活跃 \(s.active) 天 · 连续 \(s.current) 天 · 最长 \(s.longest) 天"
     }
 }
 struct Dashboard:Decodable {var date:String;var dates:[String];var providers:[ProviderUsage];var rangeKey:String;var rangeLabel:String;var chartUnit:String;var chartSpan:String;var period:[String]?;var chartStatus:String;var updated:String?;var chartPositions:[Double]?;var calendar:UsageCalendar?;var showSummary:Bool?;var allowCollapse:Bool?;var expandedProviders:[String]?}
@@ -794,23 +792,23 @@ final class DashboardView:FlippedView {
     static func harnessHeaderHeight(_ d:Dashboard)->CGFloat {d.providers.isEmpty || d.showSummary==false ? 0 : 6}
     static func height(_ d:Dashboard)->CGFloat {summaryHeight(d)+calendarHeight(d)+harnessHeaderHeight(d)+d.providers.reduce(0){$0+providerHeight($1,d)}+(d.providers.isEmpty ? 0 : 4)}
     static func totalColor(_ view:NSView)->NSColor {dark(view) ? NSColor(srgbRed:0.43,green:0.79,blue:0.75,alpha:1) : NSColor(srgbRed:0.15,green:0.47,blue:0.46,alpha:1)}
-    // The calendar sits under Summary: its figures on the left, the days on the right up to this week.
-    static let calendarPitch:CGFloat=9,calendarGap:CGFloat=1.5,calendarDayColumn:CGFloat=12,calendarTextWidth:CGFloat=100
-    static func calendarHeight(_ d:Dashboard)->CGFloat {d.calendar==nil ? 0 : 90}
+    // The calendar sits under Summary: day numbers, one row per month across the full width, then a line
+    // of figures with the shade key. The dashboard is always 344pt wide, so 31 days fill it.
+    static let calendarLabelWidth:CGFloat=24,calendarGap:CGFloat=1.6
+    static let calendarPitch=(344-24-calendarLabelWidth+calendarGap)/31
+    static func calendarHeight(_ d:Dashboard)->CGFloat {d.calendar.map{39+CGFloat($0.rows.count)*calendarPitch-calendarGap} ?? 0}
     static func calendarGrid(_ d:Dashboard,width:CGFloat)->NSRect {
-        let w=CGFloat(d.calendar?.shownWeeks ?? 0)*calendarPitch-calendarGap
-        return NSRect(x:width-12-w,y:summaryHeight(d)+16,width:w,height:7*calendarPitch-calendarGap)
+        NSRect(x:12+calendarLabelWidth,y:summaryHeight(d)+16,width:31*calendarPitch-calendarGap,height:CGFloat(d.calendar?.rows.count ?? 0)*calendarPitch-calendarGap)
     }
-    // Where the figures' rows end: clear of the day names beside the grid.
-    static func calendarInfoRight(_ d:Dashboard,width:CGFloat)->CGFloat {calendarGrid(d,width:width).minX-calendarDayColumn-16}
-    // The day under a point, or nil outside the grid and after today.
+    // The day under a point, or nil outside the grid, past a month's end and after today.
     static func calendarDay(at point:NSPoint,_ d:Dashboard,width:CGFloat)->Int? {
         guard let c=d.calendar else{return nil}
-        let grid=calendarGrid(d,width:width)
+        let grid=calendarGrid(d,width:width),rows=c.rows
         guard grid.insetBy(dx:-1,dy:-1).contains(point) else{return nil}
-        let week=min(c.shownWeeks-1,max(0,Int((point.x-grid.minX)/calendarPitch))),row=min(6,max(0,Int((point.y-grid.minY)/calendarPitch)))
-        let index=c.firstShown+week*7+row
-        return index<c.tokens.count ? index : nil
+        let row=min(rows.count-1,max(0,Int((point.y-grid.minY)/calendarPitch))),column=min(30,max(0,Int((point.x-grid.minX)/calendarPitch)))
+        guard rows.indices.contains(row),column<rows[row].length else{return nil}
+        let index=rows[row].first+column
+        return index>=0 && index<c.tokens.count ? index : nil
     }
     static func heading(_ d:Dashboard)->String {d.showSummary==false ? "Harness 用量" : "Summary"}
     // The heading ends clear of the buttons beside it; the leftmost one (自动检测) starts 209pt from the right.
@@ -874,37 +872,33 @@ final class DashboardView:FlippedView {
     }
     private func drawCalendar(_ c:UsageCalendar,left:CGFloat,right:CGFloat){
         let grid=Self.calendarGrid(data,width:bounds.width),pitch=Self.calendarPitch,cell=pitch-Self.calendarGap
-        let shades=Self.calendarShades(self),levels=c.levels,first=c.firstShown
-        for (week,label) in c.months {text(label,x:grid.minX+CGFloat(week)*pitch,y:grid.minY-14,w:30,size:8,color:.secondaryLabelColor)}
-        for (row,label) in [(0,"一"),(2,"三"),(4,"五")] {text(label,x:grid.minX-Self.calendarDayColumn,y:grid.minY+CGFloat(row)*pitch+cell/2-7,w:Self.calendarDayColumn-3,size:8,color:.secondaryLabelColor,align:.right)}
-        for week in 0..<c.shownWeeks {
-            for row in 0..<7 {
-                let index=first+week*7+row
-                guard index<levels.count else{continue}
-                let rect=NSRect(x:grid.minX+CGFloat(week)*pitch,y:grid.minY+CGFloat(row)*pitch,width:cell,height:cell)
-                shades[levels[index]].setFill();NSBezierPath(roundedRect:rect,xRadius:1.6,yRadius:1.6).fill()
+        let shades=Self.calendarShades(self),levels=c.levels,today=c.tokens.count-1
+        for day in [1,10,20,31] {text("\(day)",x:grid.minX+CGFloat(day-1)*pitch-6,y:grid.minY-13,w:cell+12,size:7.5,color:.tertiaryLabelColor,align:.center)}
+        for (r,row) in c.rows.enumerated() {
+            let y=grid.minY+CGFloat(r)*pitch
+            text(row.label,x:left,y:y+cell/2-6.5,w:Self.calendarLabelWidth-4,size:8.5,color:.secondaryLabelColor)
+            for column in 0..<row.length {
+                let index=row.first+column,rect=NSRect(x:grid.minX+CGFloat(column)*pitch,y:y,width:cell,height:cell)
+                // The rest of this month is outlined, so the block stays whole and shows how far the month has gone.
+                if index>today {
+                    let outline=NSBezierPath(roundedRect:rect.insetBy(dx:0.4,dy:0.4),xRadius:1.6,yRadius:1.6);outline.lineWidth=0.8
+                    shades[0].setStroke();outline.stroke();continue
+                }
+                shades[index<0 ? 0 : levels[index]].setFill();NSBezierPath(roundedRect:rect,xRadius:1.6,yRadius:1.6).fill()
                 if index==hoveredDay {
                     let ring=NSBezierPath(roundedRect:rect.insetBy(dx:-1,dy:-1),xRadius:2.2,yRadius:2.2);ring.lineWidth=1.2
                     NSColor.labelColor.withAlphaComponent(0.6).setStroke();ring.stroke()
                 }
             }
         }
-        // Beside the grid, rows reach from the left edge to the day names, label left and value right, so a short
-        // history leaves no hole. They hold the figures, or the day pointed at; the shade key, or that day's date,
-        // sits along the grid's bottom edge.
-        let top=grid.minY-3,infoRight=Self.calendarInfoRight(data,width:bounds.width),bottom=grid.maxY-cell
-        let pointed=hoveredDay.map{c.detail($0)},rows=pointed?.rows ?? (c.note==nil ? c.figures : [])
-        if pointed==nil,let note=c.note {text(note,x:left,y:top,w:infoRight-left,size:10,color:.secondaryLabelColor)}
-        for (i,row) in rows.enumerated() {
-            let y=top+CGFloat(i)*16
-            text(row.label,x:left,y:y+1.5,w:44,size:9.5,color:.secondaryLabelColor)
-            text(row.value,x:left+44,y:y,w:infoRight-left-44,size:11,weight:.medium,align:.right,numeric:true)
-            if i<rows.count-1 {line(NSPoint(x:left,y:y+15.5),NSPoint(x:infoRight,y:y+15.5),color:NSColor.separatorColor.withAlphaComponent(0.35),width:0.5)}
-        }
-        if let pointed {text(pointed.date,x:left,y:bottom-4,w:infoRight-left,size:9.5,color:.secondaryLabelColor);return}
-        text("少",x:left,y:bottom-3,w:12,size:8,color:.secondaryLabelColor)
-        for (i,shade) in shades.enumerated() {shade.setFill();NSBezierPath(roundedRect:NSRect(x:left+12+CGFloat(i)*pitch,y:bottom,width:cell,height:cell),xRadius:1.6,yRadius:1.6).fill()}
-        text("多",x:left+14+5*pitch,y:bottom-3,w:12,size:8,color:.secondaryLabelColor)
+        // The figures and the shade key; the day pointed at takes the whole line.
+        let y=grid.maxY+7
+        if let day=hoveredDay {text(c.detail(day),x:left,y:y-1,w:right-left,size:9.5);return}
+        let keyLeft=right-5*pitch-12
+        text(c.summary,x:left,y:y-1,w:keyLeft-left-22,size:9.5,color:.secondaryLabelColor)
+        text("少",x:keyLeft-14,y:y-1,w:10,size:8.5,color:.secondaryLabelColor,align:.right)
+        for (i,shade) in shades.enumerated() {shade.setFill();NSBezierPath(roundedRect:NSRect(x:keyLeft+CGFloat(i)*pitch,y:y+2,width:cell,height:cell),xRadius:1.6,yRadius:1.6).fill()}
+        text("多",x:right-10,y:y-1,w:10,size:8.5,color:.secondaryLabelColor,align:.right)
     }
     // Normal states say nothing; the slot shows a problem, or a note that changes how to read the numbers.
     static func note(_ p:ProviderUsage)->(String,Bool)? {
