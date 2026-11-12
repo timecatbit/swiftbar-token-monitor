@@ -331,7 +331,7 @@ class ShareCard:FlippedView {
 // The card style: an opaque card on a soft wash lit by the leading tools' colours.
 final class CardShareCard:ShareCard {
     static let margin:CGFloat=22,inset:CGFloat=24,chartHeight:CGFloat=150,modelHeight:CGFloat=24,legendRow:CGFloat=20
-    static let clientWidth=width-margin*2-inset*2-32,clientFont=NSFont.systemFont(ofSize:10.5)
+    static let clientWidth=width-margin*2-inset*2-32-12,clientFont=NSFont.systemFont(ofSize:10.5)
     static func blockHeight(_ p:ProviderUsage)->CGFloat {92+CGFloat(clientLines(p,width:clientWidth,font:clientFont).count)*18+CGFloat(max(1,p.models.count))*modelHeight}
     private var cardHeight:CGFloat {
         let header:CGFloat=44,hero:CGFloat=88,tiles:CGFloat=88,chart=dashboard.dates.count>1 ? Self.chartHeight+22 : 0
@@ -505,31 +505,33 @@ final class CardShareCard:ShareCard {
         for p in rows {
             let c=accent(p.id,self),inSummary=p.summaryIncluded != false,block=NSRect(x:left,y:y,width:width,height:Self.blockHeight(p))
             quiet.setFill();NSBezierPath(roundedRect:block,xRadius:18,yRadius:18).fill()
-            let il=block.minX+16,ir=block.maxX-16,iw=ir-il,top=block.minY+16
+            // The colour bar keeps a gutter of its own; the name and every line under it start at one edge.
+            let il=block.minX+16,ir=block.maxX-16,top=block.minY+16,tl=il+12,tw=ir-tl
             c.withAlphaComponent(inSummary ? 1 : 0.45).setFill();NSBezierPath(roundedRect:NSRect(x:il,y:top+3,width:4,height:15),xRadius:2,yRadius:2).fill()
             let nameFont=font(14.5,.semibold),amount=amount(p),amountFont=font(17,.semibold,rounded:true),amountWidth=measure(amount,amountFont)
-            let nameWidth=min(iw*0.5,measure(p.name,nameFont))
-            draw(p.name,NSRect(x:il+12,y:top,width:nameWidth,height:20),nameFont,.labelColor)
+            draw(p.name,NSRect(x:tl,y:top,width:min(tw-amountWidth-12,measure(p.name,nameFont)+2),height:20),nameFont,.labelColor)
+            draw(amount,NSRect(x:ir-amountWidth-2,y:top-1,width:amountWidth+2,height:22),amountFont,.labelColor,.right)
+            let part=p.summaryPart?.tokens ?? 0,figures=tokenLine(p)+(part>0 ? " · 占 "+share(part/sum) : ""),figureFont=font(11.5,.medium)
             // A source a gateway partly counts says so, as the panel card does: its share is only the rest.
+            // The note sits at the right of the token line, under the amount, where it has room to be read whole.
+            var noteWidth:CGFloat=0
             if !inSummary || (p.counted != nil && !p.subtitle.isEmpty) {
                 let tag=inSummary ? p.subtitle : "未计入 Summary",tagFont=font(9.5,.medium)
-                let room=ir-amountWidth-10-(il+20+nameWidth),tagWidth=min(room,measure(tag,tagFont)+14)
-                let capsule=NSRect(x:il+20+nameWidth,y:top+2,width:tagWidth,height:17)
+                noteWidth=min(tw-measure(figures,figureFont)-10,measure(tag,tagFont)+16)
+                let capsule=NSRect(x:ir-noteWidth,y:top+23.5,width:noteWidth,height:17)
                 NSColor.labelColor.withAlphaComponent(isDark ? 0.09 : 0.06).setFill();NSBezierPath(roundedRect:capsule,xRadius:8.5,yRadius:8.5).fill()
-                draw(tag,capsule.insetBy(dx:7,dy:2),tagFont,.secondaryLabelColor,.center)
+                draw(tag,x:capsule.minX+8,middle:capsule.midY,width:capsule.width-16,tagFont,.secondaryLabelColor,.center)
             }
-            draw(amount,NSRect(x:ir-amountWidth-2,y:top-1,width:amountWidth+2,height:22),amountFont,.labelColor,.right)
-            let part=p.summaryPart?.tokens ?? 0
-            draw(tokenLine(p)+(part>0 ? " · 占 "+share(part/sum) : ""),NSRect(x:il,y:top+24,width:iw,height:16),font(11.5,.medium),.secondaryLabelColor)
-            draw(DashboardView.stats(p),NSRect(x:il,y:top+42,width:iw,height:15),font(10.5,.regular),.secondaryLabelColor)
+            draw(figures,NSRect(x:tl,y:top+24,width:tw-noteWidth-(noteWidth>0 ? 10 : 0),height:16),figureFont,.secondaryLabelColor)
+            draw(DashboardView.stats(p),NSRect(x:tl,y:top+42,width:tw,height:15),font(10.5,.regular),.secondaryLabelColor)
             var my=top+66
-            for line in Self.clientLines(p,width:Self.clientWidth,font:Self.clientFont){draw(line,NSRect(x:il,y:my-6,width:iw,height:15),Self.clientFont,.secondaryLabelColor);my+=18}
-            if p.models.isEmpty{draw("此时段暂无模型调用",NSRect(x:il,y:my,width:iw,height:15),font(11,.regular),.secondaryLabelColor)}
+            for line in Self.clientLines(p,width:Self.clientWidth,font:Self.clientFont){draw(line,NSRect(x:tl,y:my-6,width:tw,height:15),Self.clientFont,.secondaryLabelColor);my+=18}
+            if p.models.isEmpty{draw("此时段暂无模型调用",NSRect(x:tl,y:my,width:tw,height:15),font(11,.regular),.secondaryLabelColor)}
             for m in p.models{
-                draw(modelName(m.name),NSRect(x:il,y:my,width:iw-140,height:16),font(11.5,.regular),.labelColor)
+                draw(modelName(m.name),NSRect(x:tl,y:my,width:tw-140,height:16),font(11.5,.regular),.labelColor)
                 draw(modelAmount(m),NSRect(x:ir-134,y:my,width:86,height:16),font(11.5,.medium,rounded:true),.labelColor,.right)
                 draw(share(m.share),NSRect(x:ir-44,y:my,width:44,height:16),font(11,.medium,rounded:true),.secondaryLabelColor,.right)
-                let track=NSRect(x:il,y:my+17,width:iw,height:3)
+                let track=NSRect(x:tl,y:my+17,width:tw,height:3)
                 NSColor.labelColor.withAlphaComponent(isDark ? 0.08 : 0.06).setFill();NSBezierPath(roundedRect:track,xRadius:1.5,yRadius:1.5).fill()
                 let fill=NSRect(x:track.minX,y:track.minY,width:max(3,track.width*CGFloat(min(1,m.share))),height:track.height)
                 NSGradient(starting:c.withAlphaComponent(0.55),ending:c)?.draw(in:NSBezierPath(roundedRect:fill,xRadius:1.5,yRadius:1.5),angle:0)
@@ -747,18 +749,20 @@ final class TerminalShareCard:ShareCard {
             colour.withAlphaComponent(inSummary ? 1 : 0.4).setFill();NSBezierPath(ovalIn:NSRect(x:left,y:top+20,width:8,height:8)).fill()
             let nameFont=ui(14.5,.semibold),cost=amount(p),costFont=mono(14.5,.semibold),costWidth=measure(cost,costFont)
             let nameWidth=min(width*0.45,measure(p.name,nameFont))
-            draw(p.name,x:left+16,middle:top+24,width:nameWidth+2,nameFont,c.text)
+            draw(p.name,x:left+16,middle:top+24,width:min(nameWidth+2,width-16-costWidth-12),nameFont,c.text)
+            draw(cost,x:right-costWidth-2,middle:top+24,width:costWidth+2,costFont,c.text,.right)
+            let part=p.summaryPart?.tokens ?? 0,figures=tokenLine(p)+(part>0 ? " · 占 "+share(part/sum) : ""),lineFont=mono(10.5,.medium)
             // A source a gateway partly counts says so, as the panel card does: its share is only the rest.
+            // The note sits at the right of the token line, under the cost, where it has room to be read whole.
+            var noteWidth:CGFloat=0
             if !inSummary || (p.counted != nil && !p.subtitle.isEmpty) {
                 let note=inSummary ? p.subtitle : "未计入 Summary",noteFont=mono(9.5,.medium)
-                let room=right-costWidth-10-(left+24+nameWidth),noteWidth=min(room,measure(note,noteFont)+12)
-                let box=NSRect(x:left+24+nameWidth,y:top+16,width:noteWidth,height:16)
+                noteWidth=min(width-16-measure(figures,lineFont)-10,measure(note,noteFont)+14)
+                let box=NSRect(x:right-noteWidth,y:top+39.5,width:noteWidth,height:16)
                 let boxPath=NSBezierPath(roundedRect:box.insetBy(dx:0.5,dy:0.5),xRadius:3.5,yRadius:3.5);c.muted.withAlphaComponent(0.45).setStroke();boxPath.lineWidth=1;boxPath.stroke()
-                draw(note,x:box.minX+6,middle:box.midY,width:box.width-12,noteFont,c.muted,.center)
+                draw(note,x:box.minX+7,middle:box.midY,width:box.width-14,noteFont,c.muted,.center)
             }
-            draw(cost,x:right-costWidth-2,middle:top+24,width:costWidth+2,costFont,c.text,.right)
-            let part=p.summaryPart?.tokens ?? 0
-            draw(tokenLine(p)+(part>0 ? " · 占 "+share(part/sum) : ""),NSRect(x:left+16,y:top+40,width:width-16,height:15),mono(10.5,.medium),c.muted)
+            draw(figures,NSRect(x:left+16,y:top+40,width:width-16-noteWidth-(noteWidth>0 ? 10 : 0),height:15),lineFont,c.muted)
             draw(DashboardView.stats(p),NSRect(x:left+16,y:top+57,width:width-16,height:15),mono(10.5),c.comment)
             var my=top+80
             for line in Self.clientLines(p,width:Self.clientWidth,font:Self.clientFont){draw(line,NSRect(x:left+16,y:my-6,width:width-16,height:15),Self.clientFont,c.comment);my+=17}
