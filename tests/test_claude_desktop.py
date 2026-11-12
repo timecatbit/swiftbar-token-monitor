@@ -95,10 +95,12 @@ class DesktopTests(unittest.TestCase):
    lines='\n'.join(self.m.claude_subscription_lines({'claude_subscription':payload}))
   self.assertIn('88%',lines);self.assertIn('Fable',lines);self.assertIn('22:00',lines);self.assertNotIn('$0',lines)
  def test_usage_colors_and_removed_balance_including_legacy_cache(self):
-  payload=live.parse_usage({'limits':[{'kind':'weekly','percent':88,'resets_at':'2026-11-12T13:59:59.644073Z'},{'percent':96,'scope':{'model':{'display_name':'Fable'}}}]})
-  payload['creditBalance']={'amount':15.34,'currency':'USD','decimals':2}
-  with patch.object(self.m,'local_zone',return_value=ZoneInfo('Asia/Taipei')):
-   lines='\n'.join(self.m.claude_subscription_lines({'claude_subscription':payload}))
+  # Read an hour before the window resets: after the reset the figures are stale and lose their colour.
+  with patch('time.time',return_value=datetime(2026,11,12,13,tzinfo=ZoneInfo('UTC')).timestamp()):
+   payload=live.parse_usage({'limits':[{'kind':'weekly','percent':88,'resets_at':'2026-11-12T13:59:59.644073Z'},{'percent':96,'scope':{'model':{'display_name':'Fable'}}}]})
+   payload['creditBalance']={'amount':15.34,'currency':'USD','decimals':2}
+   with patch.object(self.m,'local_zone',return_value=ZoneInfo('Asia/Taipei')):
+    lines='\n'.join(self.m.claude_subscription_lines({'claude_subscription':payload}))
   self.assertIn('22:00',lines);self.assertNotIn('$15.34',lines);self.assertNotIn('额度余额',lines)
   self.assertIn('panelusagelevel=warning',lines);self.assertIn('panelusagelevel=critical',lines)
   self.assertEqual([self.m.usage_level(v) for v in (0,69,70,89,90,100)],['normal','normal','warning','warning','critical','critical'])
