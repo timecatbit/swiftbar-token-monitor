@@ -3196,7 +3196,8 @@ HOURLY_RANGES=('today','24h','7d','week')
 WEEKDAYS='一二三四五六日'
 
 def heatmap_cells(key, now, used):
-    """The heatmap's squares for a range, in reading order, as (key into the figures, label, still to come).
+    """The heatmap's squares for a range, in reading order, as (key into the figures, label, still to come),
+    with the number of columns and a short name for each row, set beside it like the chart's axis labels.
     Today and 24 hours are a row of hours, 7 days and this week a row of hours per day (this week only up to
     today), 30 days and this month a row of days, and 全部 rows of 35 days, as many as reach back to the first day used."""
     zone=now.tzinfo;day=now.replace(hour=0,minute=0,second=0,microsecond=0)
@@ -3204,13 +3205,14 @@ def heatmap_cells(key, now, used):
     if key in HOURLY_RANGES:
         if key=='24h':
             base=int(now.timestamp())//3600*3600-23*3600
-            moments=[datetime.fromtimestamp(base+3600*i,zone) for i in range(24)]
+            moments=[datetime.fromtimestamp(base+3600*i,zone) for i in range(24)];names=['24小时']
         else:
             first=day-timedelta(days={'today':0,'7d':6,'week':day.weekday()}[key])
             # Each row is one local day of wall-clock hours.
             rows={'today':1,'7d':7,'week':day.weekday()+1}[key]
             moments=[(first+timedelta(days=d)).replace(hour=h) for d in range(rows) for h in range(24)]
-        return [(int(m.timestamp())//3600*3600,name(m)+' %02d:00'%m.hour,m>now) for m in moments],24
+            names=['今天'] if key=='today' else ['周'+WEEKDAYS[(first+timedelta(days=d)).weekday()] for d in range(rows)]
+        return [(int(m.timestamp())//3600*3600,name(m)+' %02d:00'%m.hour,m>now) for m in moments],24,names
     if key=='30d':first,count=day-timedelta(days=29),30
     elif key=='month':first,count=day.replace(day=1),calendar.monthrange(day.year,day.month)[1]
     else:
@@ -3219,7 +3221,12 @@ def heatmap_cells(key, now, used):
         span=(day.date()-datetime.strptime(min(since),'%Y-%m-%d').date()).days+1 if since else 1
         count=min(HEATMAP_DAYS,-(-span//35)*35);first=day-timedelta(days=count-1)
     dates=[(first+timedelta(days=i)).date() for i in range(count)]
-    return [(d.isoformat(),name(d),d>day.date()) for d in dates],(35 if key=='all' else count)
+    if key=='all':
+        # A row is named for the month it starts in, once per month.
+        starts=[dates[i].month for i in range(0,count,35)]
+        names=['%d月'%m if i==0 or m!=starts[i-1] else '' for i,m in enumerate(starts)]
+    else:names=['30天' if key=='30d' else '%d月'%day.month]
+    return [(d.isoformat(),name(d),d>day.date()) for d in dates],(35 if key=='all' else count),names
 
 
 def heatmap_payload(bundle, key, now, selected, error=None):
@@ -3236,10 +3243,10 @@ def heatmap_payload(bundle, key, now, selected, error=None):
             t[0]+=max(0.0,float(row.get('totalTokens') or 0));t[1]+=int(row.get('requests') or 0)
             t[2]+=max(0.0,float(row.get('estimatedCostUsd') or 0));t[3]+=int(row.get('unpricedRequests') or 0)
     used=[slot for slot,t in totals.items() if t[0]>0 or t[1]>0] if not hourly else []
-    cells,columns=heatmap_cells(key,now,used)
+    cells,columns,names=heatmap_cells(key,now,used)
     values=[totals.get(slot,[0.0,0,0.0,0]) for slot,_,_ in cells]
     status='' if bundle else ('数据暂不可用' if refresh_failed(error) else '待同步')
-    return {'columns':columns,'labels':[label for _,label,_ in cells],'tokens':[t[0] for t in values],'requests':[t[1] for t in values],
+    return {'columns':columns,'rowLabels':names,'labels':[label for _,label,_ in cells],'tokens':[t[0] for t in values],'requests':[t[1] for t in values],
             'costs':[round(t[2],6) for t in values],'unpriced':[t[3] for t in values],'future':sum(1 for _,_,later in cells if later),
             'status':status,'notice':'部分小时数据不可用' if partial else '','hint':'每格 1 小时' if hourly else '每格 1 天'}
 

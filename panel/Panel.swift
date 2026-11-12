@@ -28,7 +28,7 @@ struct ProviderUsage:Decodable {
 // The squares under Summary for the selected range, as Summary counts them, in reading order: a row of hours for
 // a day, a row of hours per day for a week, and days otherwise. The last `future` squares are still to come.
 struct UsageHeatmap:Decodable {
-    var columns:Int;var labels:[String];var tokens:[Double];var requests:[Int];var costs:[Double];var unpriced:[Int]
+    var columns:Int;var rowLabels:[String]?;var labels:[String];var tokens:[Double];var requests:[Int];var costs:[Double];var unpriced:[Int]
     var future:Int;var hint:String;var status:String?;var notice:String?
     var rows:Int {max(1,(tokens.count+max(1,columns)-1)/max(1,columns))}
     var past:Int {max(0,tokens.count-future)}
@@ -802,25 +802,40 @@ final class DashboardView:FlippedView {
     static func harnessHeaderHeight(_ d:Dashboard)->CGFloat {d.providers.isEmpty || d.showSummary==false || d.heatmap != nil ? 0 : 6}
     static func height(_ d:Dashboard)->CGFloat {summaryHeight(d)+heatmapHeight(d)+harnessHeaderHeight(d)+d.providers.reduce(0){$0+providerHeight($1,d)}+(d.providers.isEmpty ? 0 : 4)}
     static func totalColor(_ view:NSView)->NSColor {dark(view) ? NSColor(srgbRed:0.43,green:0.79,blue:0.75,alpha:1) : NSColor(srgbRed:0.15,green:0.47,blue:0.46,alpha:1)}
-    // The heatmap sits under Summary as squares alone, edge to edge, with its unit in small type at the bottom
+    // The chart's scale: a rounded ceiling over the highest total, labelled at zero, half and full.
+    static func chartAxis(_ d:Dashboard)->(ceiling:Double,labels:[String]) {
+        let n=d.dates.count,series=d.providers.compactMap{$0.summaryPart}.map{p in (0..<n).map{i in i<p.history.count ? max(0,p.history[i]) : 0}}
+        let observed=max((0..<n).map{i in series.reduce(0){$0+$1[i]}}.max() ?? 0,1),unit=pow(10,floor(log10(observed)))
+        let ceiling=ceil(observed*1.08/unit*2)/2*unit
+        return (ceiling,[0,0.5,1].map{axisTokens(ceiling*$0)})
+    }
+    static let axisFont=NSFont.monospacedDigitSystemFont(ofSize:8,weight:.regular),rowFont=NSFont.systemFont(ofSize:8)
+    // One column on the left holds the chart's axis labels and the heatmap's row names, so the plot above and
+    // the squares below start at the same place and both run to the right edge, like a single chart.
+    static func labelColumn(_ d:Dashboard)->CGFloat {
+        func widest(_ values:[String],_ font:NSFont)->CGFloat {values.map{ceil(($0 as NSString).size(withAttributes:[.font:font]).width)}.max() ?? 0}
+        let axis=d.showSummary==false || d.dates.isEmpty ? 0 : widest(chartAxis(d).labels,axisFont)
+        return max(axis,widest(d.heatmap?.rowLabels ?? [],rowFont))+10
+    }
+    // The heatmap sits under Summary as squares in that column's room, with its unit in small type at the bottom
     // right. The dashboard is always 344pt wide, so a row of 24 hours has larger squares than a row of 35 days.
     static let heatmapGap:CGFloat=1.6
-    static func heatmapPitch(_ h:UsageHeatmap)->CGFloat {(344-24+heatmapGap)/CGFloat(max(1,h.columns))}
-    static func heatmapHeight(_ d:Dashboard)->CGFloat {d.heatmap.map{8+CGFloat($0.rows)*heatmapPitch($0)-heatmapGap+15} ?? 0}
+    static func heatmapPitch(_ d:Dashboard)->CGFloat {(344-24-labelColumn(d)+heatmapGap)/CGFloat(max(1,d.heatmap?.columns ?? 1))}
+    static func heatmapHeight(_ d:Dashboard)->CGFloat {d.heatmap.map{8+CGFloat($0.rows)*heatmapPitch(d)-heatmapGap+15} ?? 0}
     static func heatmapGrid(_ d:Dashboard,width:CGFloat)->NSRect {
         guard let h=d.heatmap else{return .zero}
-        let pitch=heatmapPitch(h)
-        return NSRect(x:12,y:summaryHeight(d)+8,width:CGFloat(h.columns)*pitch-heatmapGap,height:CGFloat(h.rows)*pitch-heatmapGap)
+        let pitch=heatmapPitch(d)
+        return NSRect(x:12+labelColumn(d),y:summaryHeight(d)+8,width:CGFloat(h.columns)*pitch-heatmapGap,height:CGFloat(h.rows)*pitch-heatmapGap)
     }
     static func heatmapCell(_ d:Dashboard,width:CGFloat,index:Int)->NSRect {
         guard let h=d.heatmap else{return .zero}
-        let grid=heatmapGrid(d,width:width),pitch=heatmapPitch(h)
+        let grid=heatmapGrid(d,width:width),pitch=heatmapPitch(d)
         return NSRect(x:grid.minX+CGFloat(index%h.columns)*pitch,y:grid.minY+CGFloat(index/h.columns)*pitch,width:pitch-heatmapGap,height:pitch-heatmapGap)
     }
     // The square under a point, or nil outside the grid and for squares still to come.
     static func heatmapIndex(at point:NSPoint,_ d:Dashboard,width:CGFloat)->Int? {
         guard let h=d.heatmap else{return nil}
-        let grid=heatmapGrid(d,width:width),pitch=heatmapPitch(h)
+        let grid=heatmapGrid(d,width:width),pitch=heatmapPitch(d)
         guard grid.insetBy(dx:-1,dy:-1).contains(point) else{return nil}
         let index=min(h.rows-1,max(0,Int((point.y-grid.minY)/pitch)))*h.columns+min(h.columns-1,max(0,Int((point.x-grid.minX)/pitch)))
         return index<h.past ? index : nil
@@ -888,7 +903,10 @@ final class DashboardView:FlippedView {
         return [NSColor.labelColor.withAlphaComponent(dark(view) ? 0.075 : 0.06)]+[0.3,0.52,0.76,1].map{total.withAlphaComponent($0)}
     }
     private func drawHeatmap(_ h:UsageHeatmap,left:CGFloat,right:CGFloat){
-        let shades=Self.heatmapShades(self),levels=h.levels
+        let shades=Self.heatmapShades(self),levels=h.levels,grid=Self.heatmapGrid(data,width:bounds.width),pitch=Self.heatmapPitch(data)
+        for (row,name) in (h.rowLabels ?? []).enumerated() where row<h.rows && !name.isEmpty {
+            text(name,x:left,y:grid.minY+CGFloat(row)*pitch+(pitch-Self.heatmapGap)/2-6,w:Self.labelColumn(data)-4,size:8,color:.secondaryLabelColor)
+        }
         for index in 0..<min(h.tokens.count,h.rows*h.columns) {
             let rect=Self.heatmapCell(data,width:bounds.width,index:index),radius=min(2.4,rect.width*0.2)
             // Squares still to come are outlined, so the block stays whole and shows how far the day or week has gone.
@@ -902,9 +920,9 @@ final class DashboardView:FlippedView {
                 NSColor.labelColor.withAlphaComponent(0.6).setStroke();ring.stroke()
             }
         }
-        let line=Self.heatmapGrid(data,width:bounds.width).maxY+2,hintWidth=ceil((h.hint as NSString).size(withAttributes:[.font:NSFont.systemFont(ofSize:7.5)]).width)
+        let line=grid.maxY+2,hintWidth=ceil((h.hint as NSString).size(withAttributes:[.font:NSFont.systemFont(ofSize:7.5)]).width)
         text(h.hint,x:right-hintWidth-2,y:line+1,w:hintWidth+2,size:7.5,color:.tertiaryLabelColor,align:.right)
-        if let caption=Self.heatmapCaption(h,pointed:hoveredDay) {text(caption,x:left,y:line,w:right-left-hintWidth-10,size:9,color:.secondaryLabelColor)}
+        if let caption=Self.heatmapCaption(h,pointed:hoveredDay) {text(caption,x:grid.minX,y:line,w:right-grid.minX-hintWidth-10,size:9,color:.secondaryLabelColor)}
     }
     // Normal states say nothing; the slot shows a problem, or a note that changes how to read the numbers.
     static func note(_ p:ProviderUsage)->(String,Bool)? {
@@ -1038,7 +1056,7 @@ final class DashboardView:FlippedView {
         guard n>0 else{return}
         let series=summaryProviders.map{p in (0..<n).map{i in i<p.history.count ? max(0,p.history[i]) : 0}}
         let totals=(0..<n).map{i in series.reduce(0){$0+$1[i]}}
-        let totalColor=Self.totalColor(self)
+        let totalColor=Self.totalColor(self),(ceiling,axis)=Self.chartAxis(data)
         let labels=Self.legendLabels(data),colors=[totalColor]+summaryProviders.map{accent($0.id,self)}
         var index=0
         for (row,frame) in Self.legendLayout(labels,width:width).enumerated(){
@@ -1052,18 +1070,14 @@ final class DashboardView:FlippedView {
         NSGraphicsContext.saveGraphicsState()
         defer{NSGraphicsContext.restoreGraphicsState()}
         NSGraphicsContext.current?.cgContext.translateBy(x:0,y:Self.chartExtra(data))
-        let observed=max(totals.max() ?? 0,1),unit=pow(10,floor(log10(observed)))
-        let ceiling=ceil(observed*1.08/unit*2)/2*unit
-        // The chart's text keeps to the same edges as the figures above: axis labels flush left, the card
-        // right after the widest of them, and the note and last time label flush right.
-        let axis=[CGFloat(0),0.5,1].map{axisTokens(ceiling*Double($0))},axisFont=NSFont.monospacedDigitSystemFont(ofSize:8,weight:.regular)
-        let axisWidth=axis.map{ceil(($0 as NSString).size(withAttributes:[.font:axisFont]).width)}.max() ?? 0
+        // The chart's text keeps to the same edges as the figures above: axis labels flush left in the column
+        // the heatmap's row names share, the plot right after it, and the note and last time label flush right.
         // The plot has no backdrop of its own, so it sits as lightly as the squares below it.
-        let cardFrame=NSRect(x:left+axisWidth+5,y:119,width:right-left-axisWidth-5,height:90)
-        let plot=NSRect(x:cardFrame.minX+5,y:127,width:cardFrame.width-9,height:78)
+        let column=Self.labelColumn(data)
+        let plot=NSRect(x:left+column,y:127,width:right-left-column,height:78),cardFrame=NSRect(x:plot.minX,y:119,width:plot.width,height:90)
         for (f,label) in zip([CGFloat(0),0.5,1],axis){
             let yy=plot.maxY-f*plot.height
-            text(label,x:left,y:yy-5,w:axisWidth+1,size:8,color:.secondaryLabelColor,numeric:true)
+            text(label,x:left,y:yy-5,w:column-4,size:8,color:.secondaryLabelColor,numeric:true)
             line(NSPoint(x:plot.minX,y:yy),NSPoint(x:plot.maxX,y:yy),color:NSColor.separatorColor.withAlphaComponent(0.22),width:0.5)
         }
         // Partial data and when the figures were read share a faint note just above the card, clear of its edge.

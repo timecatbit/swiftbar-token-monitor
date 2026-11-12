@@ -173,18 +173,18 @@ class RangeTests(unittest.TestCase):
   h=heat('today')
   self.assertEqual((h['columns'],len(h['tokens']),h['future'],h['hint']),(24,24,11,'每格 1 小时'))
   self.assertEqual(h['tokens'][9:12],[200,500,100]);self.assertEqual((h['requests'][10],h['costs'][10],h['unpriced'][10]),(2,1.5,1))
-  self.assertEqual((h['labels'][0],h['notice']),('11月4日 周三 00:00',''))
-  h=heat('24h');self.assertEqual((h['labels'][0],h['labels'][-1],h['future']),('11月3日 周二 13:00','11月4日 周三 12:00',0))
+  self.assertEqual((h['labels'][0],h['notice'],h['rowLabels']),('11月4日 周三 00:00','',['今天']))
+  h=heat('24h');self.assertEqual((h['labels'][0],h['labels'][-1],h['future'],h['rowLabels']),('11月3日 周二 13:00','11月4日 周三 12:00',0,['24小时']))
   # A week: a row of hours per day.
   h=heat('7d');self.assertEqual((h['columns'],len(h['tokens']),h['future'],h['labels'][0],h['hint']),(24,168,11,'10月29日 周四 00:00','每格 1 小时'))
-  self.assertEqual(h['tokens'][6*24+10],500)
+  self.assertEqual(h['tokens'][6*24+10],500);self.assertEqual(h['rowLabels'],['周四','周五','周六','周日','周一','周二','周三'])
   # This week only up to today: Monday to Wednesday.
-  h=heat('week');self.assertEqual((len(h['tokens']),h['future'],h['labels'][0],h['tokens'][2*24+10]),(72,11,'11月2日 周一 00:00',500))
+  h=heat('week');self.assertEqual((len(h['tokens']),h['future'],h['labels'][0],h['tokens'][2*24+10],h['rowLabels']),(72,11,'11月2日 周一 00:00',500,['周一','周二','周三']))
   # Thirty days and this month: a row of days.
-  h=heat('30d');self.assertEqual((h['columns'],len(h['tokens']),h['labels'][0],h['tokens'][-2:],h['hint']),(30,30,'10月6日 周二',[100,700],'每格 1 天'))
-  h=heat('month');self.assertEqual((h['columns'],len(h['tokens']),h['future'],h['labels'][0]),(30,30,26,'11月1日 周日'))
+  h=heat('30d');self.assertEqual((h['columns'],len(h['tokens']),h['labels'][0],h['tokens'][-2:],h['hint'],h['rowLabels']),(30,30,'10月6日 周二',[100,700],'每格 1 天',['30天']))
+  h=heat('month');self.assertEqual((h['columns'],len(h['tokens']),h['future'],h['labels'][0],h['rowLabels']),(30,30,26,'11月1日 周日',['11月']))
   # 全部: rows of 35 days back to the first day used within the last 175.
-  h=heat('all');self.assertEqual((h['columns'],len(h['tokens']),h['labels'][0],h['labels'][-1]),(35,35,'10月1日 周四','11月4日 周三'))
+  h=heat('all');self.assertEqual((h['columns'],len(h['tokens']),h['labels'][0],h['labels'][-1],h['rowLabels']),(35,35,'10月1日 周四','11月4日 周三',['10月']))
   self.assertEqual(sum(h['tokens']),800)
   # A source whose hours couldn't be read leaves the squares short, and says so.
   self.m.preferences.write(self.m.STATE_DIR,dict(self.m.view_settings(),visible=['summary','heatmap','magpie','codex','claude']))
