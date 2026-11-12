@@ -1709,6 +1709,8 @@ def qoder_subscription_lines(data):
 
 
 RANGES={'today':'当天','24h':'近 24 小时','7d':'近 7 天','30d':'近 30 天','week':'本周','month':'本月','all':'全部'}
+# The usage calendar shows whole weeks, Monday first: this one and the 25 before it.
+CALENDAR_WEEKS=26
 
 def usage_now():
     from zoneinfo import ZoneInfo
@@ -1722,7 +1724,7 @@ def range_bounds(key,now=None):
     now=now or usage_now();day=now.replace(hour=0,minute=0,second=0,microsecond=0)
     start={'today':day,'24h':now-timedelta(hours=24),'7d':day-timedelta(days=6),
            '30d':day-timedelta(days=29),'week':day-timedelta(days=day.weekday()),
-           'month':day.replace(day=1),'all':None}[key]
+           'month':day.replace(day=1),'calendar':day-timedelta(days=day.weekday()+7*(CALENDAR_WEEKS-1)),'all':None}[key]
     return (start.timestamp() if start else 0),now.timestamp()
 
 def range_options(key=None):
@@ -2071,16 +2073,21 @@ def check_usage_alerts():
     alerts.save(STATE_DIR,marks)
 
 
+def usage_ranges_due():
+    """The selected range, and the calendar when it is shown, whose figures are due."""
+    keys=[selected_range()]+(['calendar'] if module_enabled('calendar') else [])
+    return [key for key in keys if cache_due(read_cache(range_cache_name(key)),refresh_ttl(60))]
+
+
 def refresh_usage_range(wait=False):
     """Serialize access to the indexes, independently of the slower external refreshes."""
     os.makedirs(CACHE_DIR, mode=0o700, exist_ok=True)
     with open(os.path.join(CACHE_DIR, 'range-refresh.lock'), 'a') as lock:
         try:fcntl.flock(lock, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
         except BlockingIOError:return False
-        key=selected_range()
-        if not cache_due(read_cache(range_cache_name(key)),refresh_ttl(60)):return False
-        range_usage_cached(key)
-        return True
+        due=usage_ranges_due()
+        for key in due:range_usage_cached(key)
+        return bool(due)
 
 
 def background_refresh(wait=False):
@@ -2095,7 +2102,7 @@ def background_refresh(wait=False):
             loaders = external_loaders()
             with ThreadPoolExecutor(max_workers=4) as pool:
                 futures = [pool.submit(loader) for name, loader in loaders.items() if loader_due(name)]
-                if cache_due(read_cache(range_cache_name()),refresh_ttl(60)):futures.append(pool.submit(refresh_usage_range))
+                if usage_ranges_due():futures.append(pool.submit(refresh_usage_range))
                 if pricing_due():futures.append(pool.submit(refresh_pricing))
                 for future in futures:
                     future.result()
@@ -2137,7 +2144,7 @@ def collect_cache_garbage(now=None):
 
 
 def schedule_background_refresh():
-    if any(loader_due(name) for name in external_loaders()) or cache_due(read_cache(range_cache_name()),refresh_ttl(60)):
+    if any(loader_due(name) for name in external_loaders()) or usage_ranges_due():
         launch_background('--background-refresh')
 
 
@@ -2168,6 +2175,8 @@ def cached_data():
         data[name],data[name+'_error']=cache_result(read_cache(name),ttl_for(name))
     if not chatgpt_configured():data['chatgpt']={'state':'未找到 ChatGPT 客户端登录'};data['chatgpt_error']=None
     data["range_usage"],data["range_usage_error"]=cache_result(read_cache(range_cache_name()),refresh_ttl(60))
+    if module_enabled('calendar'):
+        data['calendar_usage'],data['calendar_usage_error']=cache_result(read_cache(range_cache_name('calendar')),refresh_ttl(60))
     # A new time range and its totals appear together; keep the previous range
     # visible until then, provided it belongs to the same sources and settings.
     if not data['range_usage'] and not refresh_failed(data['range_usage_error']):
@@ -3154,6 +3163,43 @@ def add_usage(parts):
     return {'summary':summary,'days':list(total['days'].values()),'hours':list(total['hours'].values()),'firstActivityAt':min(first) if first else None}
 
 
+def summary_usage(selected):
+    """What Summary adds for each selected source. A gateway (OpenCodex, Magpie) and the client that sent a
+    request through it both log that request; matched request by request, Summary adds only the client's
+    records no gateway logged, and the gateway counts the rest. 'usage' is None when Summary adds nothing."""
+    available={source for source,_,usage in selected if usage.get('summary') and not usage.get('error')}
+    result={}
+    for source,_,usage in selected:
+        carried={name:n for name,n in (usage.get('carried') or {}).items() if n and name.lower() in available}
+        # A gateway with nothing to show can't count what it carried, so the client counts those again.
+        missing=[part for name,part in (usage.get('carriedParts') or {}).items() if name not in carried]
+        counted=add_usage([usage['counted']]+missing) if usage.get('counted') and missing else usage.get('counted') or {}
+        # Without OpenCodex's own log the proxy stays the summary authority for the local ChatGPT records.
+        if source=='codex' and 'opencodex' in available and not usage.get('proxyMatched'):entry={'usage':None,'proxy':True}
+        elif carried and not (counted.get('summary') or {}).get('requests'):entry={'usage':None}
+        else:entry={'usage':counted if carried else usage}
+        result[source]=dict(entry,carried=carried,counted=counted if carried else None)
+    return result
+
+
+def calendar_payload(data, now):
+    """Each day of the calendar's weeks up to today, as Summary counts it."""
+    bundle=data.get('calendar_usage') or {}
+    if bundle.get('range')!='calendar':bundle={}
+    first=datetime.fromtimestamp(range_bounds('calendar',now)[0],now.tzinfo).date();count=(now.date()-first).days+1
+    tokens=[0.0]*count;requests=[0]*count;costs=[0.0]*count;unpriced=[0]*count
+    selected=[(k,label,bundle.get(k) or {}) for k,label,category in preferences.MODULES if k in preferences.USAGE and module_enabled(k)]
+    for part in summary_usage(selected).values():
+        for day in (part['usage'] or {}).get('days') or []:
+            try:index=(datetime.strptime(str(day.get('date',''))[:10],'%Y-%m-%d').date()-first).days
+            except ValueError:continue
+            if not 0<=index<count:continue
+            tokens[index]+=max(0.0,float(day.get('totalTokens') or 0));requests[index]+=int(day.get('requests') or 0)
+            costs[index]+=max(0.0,float(day.get('estimatedCostUsd') or 0));unpriced[index]+=int(day.get('unpricedRequests') or 0)
+    status='' if bundle else ('数据暂不可用' if refresh_failed(data.get('calendar_usage_error')) else '待同步')
+    return {'start':first.isoformat(),'tokens':tokens,'requests':requests,'costs':[round(c,6) for c in costs],'unpriced':unpriced,'status':status}
+
+
 def dashboard_payload(data):
     def number(value):
         try:
@@ -3214,24 +3260,18 @@ def dashboard_payload(data):
     for source,label,usage in selected:
         status='运行正常' if source=='opencodex' and data.get('healthz') else '已同步'
         providers.append(provider(source,label,usage,'',status))
-    # A gateway (OpenCodex, Magpie) and the client that sent a request through it both log that request.
-    # Matched request by request, the client's card still shows all its own records, while Summary adds
-    # only the ones no gateway logged; the gateway counts the rest. Without OpenCodex's own log the proxy
-    # stays the summary authority for the local ChatGPT records.
-    available={p['id'] for p in providers if p['available']}
+    # The client's card still shows all its own records, while Summary adds what summary_usage counts.
+    counting=summary_usage(selected)
     for p,(source,label,usage) in zip(providers,selected):
-        carried={name:n for name,n in (usage.get('carried') or {}).items() if n and name.lower() in available}
-        # A gateway with nothing to show can't count what it carried, so the client counts those again.
-        missing=[part for name,part in (usage.get('carriedParts') or {}).items() if name not in carried]
-        counted=add_usage([usage['counted']]+missing) if usage.get('counted') and missing else usage.get('counted') or {}
-        if source=='codex' and 'opencodex' in available and not usage.get('proxyMatched'):
+        part=counting[source];carried=part['carried']
+        if part.get('proxy'):
             p['summaryIncluded']=False;p['subtitle']='未计入 Summary'
-        elif carried and not number((counted.get('summary') or {}).get('requests')):
+        elif part['usage'] is None:
             p['summaryIncluded']=False;p['subtitle']='已由 %s 计入'%'、'.join(carried)
         else:
             p['summaryIncluded']=True
             if carried:
-                part=provider(source,label,counted,'','已同步')
+                part=provider(source,label,part['counted'],'','已同步')
                 p['counted']={key:part[key] for key in ('cost','tokens','requests','unpriced','cache','history')}
                 p['subtitle']='%d 次已由 %s 计入'%(sum(carried.values()),'、'.join(carried))
     def summary_history(p):return (p.get('counted') or p)['history']
@@ -3282,6 +3322,7 @@ def dashboard_payload(data):
         updated='更新时间：'+read.strftime('%H:%M' if read.date()==now.date() else '%m/%d %H:%M')
     return {'date':now.date().isoformat(),'dates':labels,'providers':providers,'rangeKey':key,'rangeLabel':RANGES[key],
             'chartUnit':unit,'chartSpan':span,'period':period,'chartStatus':chart_status,'updated':updated,'chartPositions':chart_positions,
+            'calendar':calendar_payload(data,now) if module_enabled('calendar') and selected else None,
             'showSummary':module_enabled('summary'),'allowCollapse':view_settings()['allowCollapse'],'expandedProviders':view_settings()['expandedProviders']}
 
 
@@ -3574,7 +3615,7 @@ def run_action(name, extra):
         if cache_due(read_cache(range_cache_name(key)),refresh_ttl(60)):
             launch_background('--refresh-range')
     elif name == "refresh":
-        invalidate_caches([range_cache_name()] + list(EXTERNAL_TTLS) + list(named_key_loaders()))
+        invalidate_caches([range_cache_name(),range_cache_name('calendar')] + list(EXTERNAL_TTLS) + list(named_key_loaders()))
         schedule_background_refresh()
     elif name == "update-self":
         release=plugin_update({'self_update':read_cache('self_update').get('payload') or {}})

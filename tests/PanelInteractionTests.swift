@@ -219,6 +219,30 @@ gateway.clients=[ModelUsage(name:"ChatGPT",tokens:60,share:0.6,credits:nil),Mode
 expect(DashboardView.clientLine(gateway)=="客户端 · ChatGPT 60% · Claude Code 40%" && DashboardView.sectionHeight(gateway)==plainHeight+16,"A gateway card adds one line naming its clients")
 gateway.available=false
 expect(DashboardView.clientLine(gateway)==nil,"A card without data names no clients")
+// The usage calendar: Monday-first weeks from 2026-05-11 up to Wednesday 2026-11-04.
+var days=UsageCalendar(start:"2026-05-11",tokens:[Double](repeating:0,count:178),requests:[Int](repeating:0,count:178),costs:[Double](repeating:0,count:178),unpriced:[Int](repeating:0,count:178),status:"")
+for (i,v) in [(170,10.0),(171,20),(172,30),(173,40),(176,5),(177,40)] {days.tokens[i]=v;days.requests[i]=1}
+days.requests[100]=3
+expect(days.levels[177]==4 && days.levels[173]==4 && days.levels[172]==3 && days.levels[170]==2 && days.levels[176]==1,"Shades go by rank, and the busiest day is the darkest")
+expect(days.levels[100]==1 && days.levels[0]==0,"Requests without tokens take the lightest shade; idle days none")
+expect(days.summary=="活跃 7 天 · 连续 2 天 · 最长 4 天","The figures line counts active days and runs")
+days.requests[177]=0;days.tokens[177]=0
+expect(days.streaks.current==1,"Before today's first request the run counts up to yesterday")
+days.tokens[177]=40;days.requests[177]=2;days.costs[177]=0.25;days.unpriced[177]=1
+expect(days.detail(177)=="11月4日 周三 · 40 Token · 已知 $0.25 · 2 请求" && days.detail(1)=="5月12日 周二 · 无用量","Pointing at a day reads it out")
+expect(days.months.map{"\($0.week):\($0.label)"}==["0:5月","3:6月","7:7月","11:8月","16:9月","20:10月","24:11月"],"Months are named over the week holding their first day")
+days.status="待同步"
+expect(days.summary=="待同步","Before the first read the calendar says so")
+var withoutCalendar=grouped;withoutCalendar.showSummary=true
+var calendarData=withoutCalendar;calendarData.calendar=days
+let calendarGrid=DashboardView.calendarGrid(calendarData,width:344)
+expect(abs(calendarGrid.maxX-332)<0.01 && DashboardView.height(calendarData)==DashboardView.height(withoutCalendar)+DashboardView.calendarHeight(calendarData),"The calendar spans the figures above and adds its own height")
+expect(DashboardView.calendarDay(at:NSPoint(x:calendarGrid.minX+1,y:calendarGrid.minY+1),calendarData,width:344)==0,"The top-left cell is the first Monday")
+expect(DashboardView.calendarDay(at:NSPoint(x:calendarGrid.maxX-1,y:calendarGrid.minY+2.5*DashboardView.calendarPitch(width:344)),calendarData,width:344)==177,"The last column holds this week")
+expect(DashboardView.calendarDay(at:NSPoint(x:calendarGrid.maxX-1,y:calendarGrid.maxY-1),calendarData,width:344)==nil && DashboardView.calendarDay(at:NSPoint(x:calendarGrid.minX-6,y:calendarGrid.minY),calendarData,width:344)==nil,"Days after today and points outside the grid read nothing")
+calendarData.allowCollapse=true
+let calendarFold=DashboardView(calendarData,width:344).subviews.compactMap{$0 as? DisclosureButton}.first!
+expect(calendarFold.frame.minY==DashboardView.summaryHeight(calendarData)+DashboardView.calendarHeight(calendarData)+DashboardView.harnessHeaderHeight(calendarData)+2,"Folded cards start below the calendar")
 expect(!MenuLayout.aiming(from:NSPoint(x:330,y:480),to:NSPoint(x:332,y:479),flyout:openFlyout),"A tiny drift toward the flyout is not aiming")
 // The share picture is opaque, signed, and lists every source that has data.
 var shareSource=grouped;shareSource.providers[0].available=false

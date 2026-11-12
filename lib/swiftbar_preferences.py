@@ -9,6 +9,7 @@ import swiftbar_files as files
 
 MODULES = (
     ('summary', 'Summary', '概览'),
+    ('calendar', '用量日历', '概览'),
     ('opencodex', 'OpenCodex', 'Harness'),
     ('magpie', 'Magpie', 'Harness'),
     ('claude', 'Claude', 'Harness'),
@@ -23,8 +24,11 @@ MODULES = (
     ('updates', 'Harness 更新', '其他'),
 )
 ALERT_LEVELS = (0, 70, 80, 90)  # Usage alert: 0 is off.
-DEFAULT_VISIBLE = ['summary', 'opencodex', 'claude', 'deepseek', 'chatgpt', 'komari', 'updates']
+DEFAULT_VISIBLE = ['summary', 'calendar', 'opencodex', 'claude', 'deepseek', 'chatgpt', 'komari', 'updates']
 KNOWN = {row[0] for row in MODULES}
+# Modules added after release show once for people who keep Summary on; a saved file lists the modules
+# it already knew, so hiding one of these afterwards sticks.
+INTRODUCED = ('calendar',)
 USAGE = ('opencodex', 'magpie', 'claude', 'codex', 'opencode', 'deepseek-harness', 'workbuddy', 'qoder', 'gemini')
 
 
@@ -53,6 +57,11 @@ def read(directory):
         if isinstance(visible, list) and all(isinstance(v, str) for v in visible):
             # The ChatGPT subscription source now follows the OpenCodex selection; no separate choice.
             defaults['visible'] = list(dict.fromkeys('chatgpt' if v == 'codex-quota' else v for v in visible if v in KNOWN or v == 'codex-quota'))
+            known = value.get('modules') if isinstance(value.get('modules'), list) else []
+            new = [k for k in INTRODUCED if k not in known and k not in defaults['visible'] and 'summary' in defaults['visible']]
+            if new:
+                at = defaults['visible'].index('summary') + 1
+                defaults['visible'][at:at] = new
         subscriptions = value.get('configuredSubscriptions')
         if isinstance(subscriptions, list):
             defaults['configuredSubscriptions'] = [k for k in catalog.MANUAL_SUBSCRIPTIONS if k in subscriptions]
@@ -84,7 +93,7 @@ def read(directory):
 
 
 def write(directory, value):
-    value=dict(value,revision=max(time.time_ns(),read(directory)['revision']+1))
+    value=dict(value,revision=max(time.time_ns(),read(directory)['revision']+1),modules=[m[0] for m in MODULES])
     root = Path(directory)
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd, temporary = tempfile.mkstemp(prefix='.preferences-', dir=root)

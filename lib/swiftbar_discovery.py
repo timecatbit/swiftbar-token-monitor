@@ -28,7 +28,7 @@ def has_records(root, patterns=('*.jsonl',)):
 
 
 def detect(paths, home=None, configured_proxy=False, komari_url='', which=shutil.which, app_roots=(), chatgpt_home=None, configured_subscriptions=()):
-    home=Path(home or Path.home());found={'summary','updates'}
+    home=Path(home or Path.home());found={'summary','calendar','updates'}
     if configured_proxy:found.update(('opencodex','chatgpt'))
     for source,binary in (('codex','codex'),('opencode','opencode'),('gemini','gemini'),('deepseek-harness','dsh')):
         if which(binary):found.add(source)
