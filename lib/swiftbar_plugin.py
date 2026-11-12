@@ -1709,8 +1709,8 @@ def qoder_subscription_lines(data):
 
 
 RANGES={'today':'当天','24h':'近 24 小时','7d':'近 7 天','30d':'近 30 天','week':'本周','month':'本月','all':'全部'}
-# The usage calendar shows whole weeks, Monday first: this one and the 25 before it.
-CALENDAR_WEEKS=26
+# The usage calendar reads whole weeks, Monday first: this one and the 20 before it.
+CALENDAR_WEEKS=21
 
 def usage_now():
     from zoneinfo import ZoneInfo

@@ -25,10 +25,11 @@ struct ProviderUsage:Decodable {
         return part
     }
 }
-// Each day from a Monday 25 weeks back up to today, as Summary counts it.
+// Each day from a Monday 20 weeks back up to today, as Summary counts it.
 struct UsageCalendar:Decodable {
     var start:String;var tokens:[Double];var requests:[Int];var costs:[Double];var unpriced:[Int];var status:String?
-    static let weeks=26
+    // The weeks read, and the fewest shown, so someone who just started still sees a month.
+    static let maxWeeks=21,minWeeks=4
     var active:[Bool] {tokens.indices.map{tokens[$0]>0 || (requests.indices.contains($0) && requests[$0]>0)}}
     // Four shades by rank among the days with tokens, so a few heavy days don't wash out the rest and the
     // busiest day is always the darkest. Days with requests but no tokens (Qoder CN Credits) take the lightest.
@@ -51,37 +52,47 @@ struct UsageCalendar:Decodable {
         while index>=0 && flags[index]{current+=1;index-=1}
         return (flags.filter{$0}.count,current,longest)
     }
+    // Weeks from the first one with any use up to this one: at least a month, never an empty stretch before.
+    var shownWeeks:Int {
+        let weeks=(tokens.count+6)/7
+        guard let first=active.firstIndex(of:true) else{return max(1,min(weeks,Self.minWeeks))}
+        return max(1,min(weeks,max(Self.minWeeks,weeks-first/7)))
+    }
+    var firstShown:Int {max(0,(tokens.count+6)/7-shownWeeks)*7}
     static let calendar:Calendar={var c=Calendar(identifier:.gregorian);c.timeZone=TimeZone(identifier:"UTC")!;return c}()
     var firstDay:Date? {let f=DateFormatter();f.calendar=Self.calendar;f.timeZone=Self.calendar.timeZone;f.dateFormat="yyyy-MM-dd";return f.date(from:start)}
     func day(_ index:Int)->Date? {firstDay.flatMap{Self.calendar.date(byAdding:.day,value:index,to:$0)}}
-    // A month is named over the week holding its first day; the first week's month only when there's room.
+    // A month is named over the shown week holding its first day; the first week's month only when there's room.
     var months:[(week:Int,label:String)] {
         guard firstDay != nil else{return []}
         var result:[(week:Int,label:String)]=[]
-        for index in 0..<(Self.weeks*7) {
-            guard let date=day(index),Self.calendar.component(.day,from:date)==1 else{continue}
-            result.append((index/7,"\(Self.calendar.component(.month,from:date))月"))
+        for week in 0..<shownWeeks {
+            for row in 0..<7 {
+                guard let date=day(firstShown+week*7+row),Self.calendar.component(.day,from:date)==1 else{continue}
+                result.append((week,"\(Self.calendar.component(.month,from:date))月"))
+            }
         }
-        if let date=day(0),result.first.map({$0.week>=3}) ?? true {result.insert((0,"\(Self.calendar.component(.month,from:date))月"),at:0)}
+        if let date=day(firstShown),result.first.map({$0.week>=3}) ?? true {result.insert((0,"\(Self.calendar.component(.month,from:date))月"),at:0)}
         return result
     }
-    func detail(_ index:Int)->String {
-        guard let date=day(index) else{return ""}
+    // The day pointed at: its date, then its tokens, known cost and requests.
+    func detail(_ index:Int)->[String] {
+        guard let date=day(index) else{return []}
         let f=DateFormatter();f.calendar=Self.calendar;f.timeZone=Self.calendar.timeZone;f.locale=Locale(identifier:"zh_CN");f.dateFormat="M月d日 EEE"
         let label=f.string(from:date),n=requests.indices.contains(index) ? requests[index] : 0
-        guard tokens.indices.contains(index),active[index] else{return label+" · 无用量"}
-        var parts=[label]
-        if tokens[index]>0 {parts.append(tokenText(tokens[index])+" Token")}
+        guard tokens.indices.contains(index),active[index] else{return [label,"无用量"]}
+        var lines=[label]
+        if tokens[index]>0 {lines.append(tokenText(tokens[index])+" Token")}
         let cost=costs.indices.contains(index) ? costs[index] : 0,partial=unpriced.indices.contains(index) && unpriced[index]>0
-        if cost>0 {parts.append((partial ? "已知 " : "")+money(cost))}
-        parts.append("\(n) 请求")
-        return parts.joined(separator:" · ")
+        if cost>0 {lines.append((partial ? "已知 " : "")+money(cost))}
+        lines.append("\(n) 请求")
+        return lines
     }
-    var summary:String {
+    var figures:[(label:String,value:String)] {let s=streaks;return [("活跃","\(s.active) 天"),("连续","\(s.current) 天"),("最长","\(s.longest) 天")]}
+    // Said in place of the figures before the first read, or when nothing has been used yet.
+    var note:String? {
         if let status,!status.isEmpty {return status}
-        let s=streaks
-        guard s.active>0 else{return "近半年暂无用量"}
-        return (["活跃 \(s.active) 天"]+(s.current>0 ? ["连续 \(s.current) 天"] : [])+["最长 \(s.longest) 天"]).joined(separator:" · ")
+        return active.contains(true) ? nil : "暂无用量"
     }
 }
 struct Dashboard:Decodable {var date:String;var dates:[String];var providers:[ProviderUsage];var rangeKey:String;var rangeLabel:String;var chartUnit:String;var chartSpan:String;var period:[String]?;var chartStatus:String;var updated:String?;var chartPositions:[Double]?;var calendar:UsageCalendar?;var showSummary:Bool?;var allowCollapse:Bool?;var expandedProviders:[String]?}
@@ -788,23 +799,25 @@ final class DashboardView:FlippedView {
     static func harnessHeaderHeight(_ d:Dashboard)->CGFloat {d.providers.isEmpty || d.showSummary==false ? 0 : 6}
     static func height(_ d:Dashboard)->CGFloat {summaryHeight(d)+calendarHeight(d)+harnessHeaderHeight(d)+d.providers.reduce(0){$0+providerHeight($1,d)}+(d.providers.isEmpty ? 0 : 4)}
     static func totalColor(_ view:NSView)->NSColor {dark(view) ? NSColor(srgbRed:0.43,green:0.79,blue:0.75,alpha:1) : NSColor(srgbRed:0.15,green:0.47,blue:0.46,alpha:1)}
-    // The calendar sits under Summary: month names, seven rows of days, then a line of figures and the shade key.
-    static let calendarDayColumn:CGFloat=16,calendarGap:CGFloat=2.5
-    static func calendarPitch(width:CGFloat)->CGFloat {(width-24-calendarDayColumn+calendarGap)/CGFloat(UsageCalendar.weeks)}
-    static func calendarHeight(_ d:Dashboard)->CGFloat {d.calendar==nil ? 0 : 54+6*calendarPitch(width:344)+calendarPitch(width:344)-calendarGap}
+    // The calendar sits under Summary: its figures on the left, the days on the right up to this week.
+    static let calendarPitch:CGFloat=9,calendarGap:CGFloat=1.5,calendarDayColumn:CGFloat=12,calendarTextWidth:CGFloat=108
+    static func calendarHeight(_ d:Dashboard)->CGFloat {d.calendar==nil ? 0 : 90}
     static func calendarGrid(_ d:Dashboard,width:CGFloat)->NSRect {
-        let pitch=calendarPitch(width:width)
-        return NSRect(x:12+calendarDayColumn,y:summaryHeight(d)+24,width:CGFloat(UsageCalendar.weeks)*pitch-calendarGap,height:7*pitch-calendarGap)
+        let w=CGFloat(d.calendar?.shownWeeks ?? 0)*calendarPitch-calendarGap
+        return NSRect(x:width-12-w,y:summaryHeight(d)+16,width:w,height:7*calendarPitch-calendarGap)
     }
     // The day under a point, or nil outside the grid and after today.
     static func calendarDay(at point:NSPoint,_ d:Dashboard,width:CGFloat)->Int? {
         guard let c=d.calendar else{return nil}
-        let grid=calendarGrid(d,width:width),pitch=calendarPitch(width:width)
+        let grid=calendarGrid(d,width:width)
         guard grid.insetBy(dx:-1,dy:-1).contains(point) else{return nil}
-        let week=min(UsageCalendar.weeks-1,max(0,Int((point.x-grid.minX)/pitch))),row=min(6,max(0,Int((point.y-grid.minY)/pitch)))
-        let index=week*7+row
+        let week=min(c.shownWeeks-1,max(0,Int((point.x-grid.minX)/calendarPitch))),row=min(6,max(0,Int((point.y-grid.minY)/calendarPitch)))
+        let index=c.firstShown+week*7+row
         return index<c.tokens.count ? index : nil
     }
+    static func heading(_ d:Dashboard)->String {d.showSummary==false ? "Harness 用量" : "Summary"}
+    // The heading ends clear of the buttons beside it; the leftmost one (自动检测) starts 209pt from the right.
+    static func headingWidth(_ width:CGFloat)->CGFloat {width-209-18}
     init(_ data:Dashboard,width:CGFloat){
         self.data=data;super.init(frame:NSRect(x:0,y:0,width:width,height:Self.height(data)))
         setAccessibilityElement(true);setAccessibilityRole(.group);setAccessibilityLabel("用量概览")
@@ -842,7 +855,7 @@ final class DashboardView:FlippedView {
     override func draw(_ dirtyRect:NSRect){
         let left:CGFloat=12,right=bounds.width-12,width=right-left
         let valid=summaryProviders.filter{$0.available},costs=valid.compactMap{$0.cost}
-        text(data.showSummary==false ? "Harness Token 用量" : "Summary",x:left,y:10,w:150,size:14,weight:.semibold)
+        text(Self.heading(data),x:left,y:10,w:Self.headingWidth(bounds.width),size:14,weight:.semibold)
         if data.showSummary != false {
         let partial=valid.count != summaryProviders.count || valid.contains{$0.unpriced>0}
         let labels=[partial ? "已知 API 估算" : "API 估算","Token 用量","请求"]
@@ -863,25 +876,40 @@ final class DashboardView:FlippedView {
         return [NSColor.labelColor.withAlphaComponent(dark(view) ? 0.075 : 0.06)]+[0.3,0.52,0.76,1].map{total.withAlphaComponent($0)}
     }
     private func drawCalendar(_ c:UsageCalendar,left:CGFloat,right:CGFloat){
-        let grid=Self.calendarGrid(data,width:bounds.width),pitch=Self.calendarPitch(width:bounds.width),cell=pitch-Self.calendarGap
-        let shades=Self.calendarShades(self),levels=c.levels
-        for (week,label) in c.months {text(label,x:grid.minX+CGFloat(week)*pitch,y:grid.minY-15,w:40,size:8.5,color:.secondaryLabelColor)}
-        for (row,label) in [(0,"一"),(2,"三"),(4,"五")] {text(label,x:left,y:grid.minY+CGFloat(row)*pitch+cell/2-6.5,w:Self.calendarDayColumn-4,size:8.5,color:.secondaryLabelColor)}
-        for index in 0..<min(levels.count,UsageCalendar.weeks*7) {
-            let rect=NSRect(x:grid.minX+CGFloat(index/7)*pitch,y:grid.minY+CGFloat(index%7)*pitch,width:cell,height:cell)
-            shades[levels[index]].setFill();NSBezierPath(roundedRect:rect,xRadius:2,yRadius:2).fill()
-            if index==hoveredDay {
-                let ring=NSBezierPath(roundedRect:rect.insetBy(dx:-1,dy:-1),xRadius:2.5,yRadius:2.5);ring.lineWidth=1.2
-                NSColor.labelColor.withAlphaComponent(0.55).setStroke();ring.stroke()
+        let grid=Self.calendarGrid(data,width:bounds.width),pitch=Self.calendarPitch,cell=pitch-Self.calendarGap
+        let shades=Self.calendarShades(self),levels=c.levels,first=c.firstShown
+        for (week,label) in c.months {text(label,x:grid.minX+CGFloat(week)*pitch,y:grid.minY-14,w:30,size:8,color:.secondaryLabelColor)}
+        for (row,label) in [(0,"一"),(2,"三"),(4,"五")] {text(label,x:grid.minX-Self.calendarDayColumn,y:grid.minY+CGFloat(row)*pitch+cell/2-7,w:Self.calendarDayColumn-3,size:8,color:.secondaryLabelColor,align:.right)}
+        for week in 0..<c.shownWeeks {
+            for row in 0..<7 {
+                let index=first+week*7+row
+                guard index<levels.count else{continue}
+                let rect=NSRect(x:grid.minX+CGFloat(week)*pitch,y:grid.minY+CGFloat(row)*pitch,width:cell,height:cell)
+                shades[levels[index]].setFill();NSBezierPath(roundedRect:rect,xRadius:1.6,yRadius:1.6).fill()
+                if index==hoveredDay {
+                    let ring=NSBezierPath(roundedRect:rect.insetBy(dx:-1,dy:-1),xRadius:2.2,yRadius:2.2);ring.lineWidth=1.2
+                    NSColor.labelColor.withAlphaComponent(0.6).setStroke();ring.stroke()
+                }
             }
         }
-        // The shade key keeps to the right edge; the figures, or the day pointed at, take the rest of the line.
-        let y=grid.maxY+9,key=CGFloat(5)*(8+2)-2,keyLeft=right-key-14
-        text("多",x:right-10,y:y-1,w:10,size:8.5,color:.secondaryLabelColor,align:.right)
-        for (i,shade) in shades.enumerated() {shade.setFill();NSBezierPath(roundedRect:NSRect(x:keyLeft+CGFloat(i)*10,y:y+2,width:8,height:8),xRadius:1.5,yRadius:1.5).fill()}
-        text("少",x:keyLeft-14,y:y-1,w:10,size:8.5,color:.secondaryLabelColor,align:.right)
-        let caption=hoveredDay.map{c.detail($0)} ?? c.summary
-        text(caption,x:left,y:y-1,w:keyLeft-left-22,size:9.5,color:hoveredDay==nil ? .secondaryLabelColor : .labelColor,numeric:false)
+        // Beside the grid: the day pointed at, or the figures with the shade key along the grid's bottom edge.
+        let top=grid.minY-3,width=Self.calendarTextWidth
+        if let day=hoveredDay {
+            for (i,line) in c.detail(day).enumerated() {text(line,x:left,y:top+(i==0 ? 0 : 3)+CGFloat(i)*14,w:width,size:i==0 ? 11 : 10,color:i==0 ? .labelColor : .secondaryLabelColor,weight:i==0 ? .medium : .regular)}
+            return
+        }
+        if let note=c.note {text(note,x:left,y:top,w:width,size:10,color:.secondaryLabelColor)}
+        else {
+            for (i,figure) in c.figures.enumerated() {
+                let y=top+CGFloat(i)*16
+                text(figure.label,x:left,y:y+1.5,w:28,size:9.5,color:.secondaryLabelColor)
+                text(figure.value,x:left+28,y:y,w:width-28,size:11,weight:.medium,numeric:true)
+            }
+        }
+        let key=grid.maxY-cell
+        text("少",x:left,y:key-3,w:12,size:8,color:.secondaryLabelColor)
+        for (i,shade) in shades.enumerated() {shade.setFill();NSBezierPath(roundedRect:NSRect(x:left+12+CGFloat(i)*pitch,y:key,width:cell,height:cell),xRadius:1.6,yRadius:1.6).fill()}
+        text("多",x:left+14+5*pitch,y:key-3,w:12,size:8,color:.secondaryLabelColor)
     }
     // Normal states say nothing; the slot shows a problem, or a note that changes how to read the numbers.
     static func note(_ p:ProviderUsage)->(String,Bool)? {
@@ -1794,7 +1822,7 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
         label.textColor=current.ok ? statusGreen(surface) : .systemOrange
         let size=label.intrinsicContentSize,anchor=surface.convert(detect.bounds,from:detect)
         // Only in the gap after the heading; with a long heading the button alone carries the feedback.
-        let heading=(snapshot?.dashboard?.showSummary==false ? "Harness Token 用量" : "Summary") as NSString
+        let heading=(snapshot?.dashboard.map(DashboardView.heading) ?? "Summary") as NSString
         let headingRight=surface.convert(NSPoint(x:12,y:0),from:row).x+ceil(heading.size(withAttributes:[.font:NSFont.systemFont(ofSize:14,weight:.semibold)]).width)+6
         // A little slack in the width keeps the last glyph from being clipped; the gap keeps it clear of the buttons.
         let width=ceil(size.width)+4,x=anchor.minX-12-width
