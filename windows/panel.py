@@ -1,15 +1,16 @@
 """Windows tray flyout: a compact dashboard using the shared snapshot contract."""
 import base64
+import bisect
 import math
 import time
 from html import escape
 
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import (QColor, QFont, QIcon, QPainter, QPainterPath,
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import (QColor, QFont, QFontMetrics, QIcon, QPainter, QPainterPath,
                            QPalette, QPen, QPixmap)
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel,
-                               QMenu, QScrollArea, QSizePolicy, QToolButton, QToolTip, QVBoxLayout, QWidget)
+                               QMenu, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
 from host import summary_parts
 
@@ -27,6 +28,80 @@ def tokens(n):
 
 def cash(n):
     return '—' if n is None else f'${n:,.2f}'
+
+
+def axis_tokens(n):
+    # Round figures on the chart's scale: 500M, 1.5B, 40K.
+    for scale,suffix in ((1e9,'B'),(1e6,'M'),(1e3,'K')):
+        if n>=scale:
+            value=n/scale
+            return (f'{value:.0f}' if value>=10 or value==int(value) else f'{value:.1f}')+suffix
+    return f'{n:.0f}'
+
+
+def chart_axis(dashboard):
+    """A rounded ceiling over the highest Summary total, labelled at zero, half and full, as on macOS."""
+    parts=summary_parts(dashboard);count=len(dashboard.get('dates',[]))
+    totals=[sum(max(0,p['history'][i]) for p in parts if i<len(p['history'])) for i in range(count)]
+    observed=max(max(totals,default=0),1);unit=10**math.floor(math.log10(observed))
+    ceiling=math.ceil(observed*1.08/unit*2)/2*unit
+    return ceiling,[axis_tokens(ceiling*portion) for portion in (0,.5,1)]
+
+
+def small_font():
+    font=QFont(QApplication.font());font.setPointSizeF(8);return font
+
+
+def tone(alpha=1.0):
+    """Secondary text in the panel's own palette, so painted labels match the styled ones."""
+    dark=QApplication.palette().color(QPalette.Window).lightness()<128
+    color=QColor('#a5aebd' if dark else '#596477');color.setAlphaF(alpha);return color
+
+
+def heat_active(h):
+    requests=h.get('requests',[])
+    return [n>0 or (i<len(requests) and requests[i]>0) for i,n in enumerate(h['tokens'])]
+
+
+def heat_levels(h):
+    """Four shades by rank among the squares with tokens, so the busiest is always the darkest and a few
+    heavy hours don't wash out the rest. Requests without tokens (Qoder CN Credits) take the lightest."""
+    values=sorted(n for n in h['tokens'] if n>0);levels=[]
+    for n,active in zip(h['tokens'],heat_active(h)):
+        if not active:levels.append(0)
+        elif n<=0:levels.append(1)
+        else:levels.append(max(1,min(4,math.ceil(4*bisect.bisect_right(values,n)/len(values)))))
+    return levels
+
+
+def heat_detail(h,i):
+    """The square pointed at, in one line: when, tokens, known cost and requests."""
+    labels=h['labels']
+    if not 0<=i<len(labels):return ''
+    n=h['requests'][i] if i<len(h['requests']) else 0
+    if not heat_active(h)[i]:return labels[i]+' · 无用量'
+    parts=[labels[i]]
+    if h['tokens'][i]>0:parts.append(tokens(h['tokens'][i])+' Token')
+    cost=h['costs'][i] if i<len(h['costs']) else 0
+    if cost>0:parts.append(('已知 ' if i<len(h['unpriced']) and h['unpriced'][i]>0 else '')+cash(cost))
+    parts.append(f'{n} 请求')
+    return ' · '.join(parts)
+
+
+def heat_note(h):
+    """Said at the bottom left while no square is pointed at: why there's nothing yet, or what is missing."""
+    if h.get('status'):return h['status']
+    if not any(heat_active(h)):return '暂无用量'
+    return h.get('notice') or ''
+
+
+def label_column(dashboard):
+    """One left column holds the chart's scale and the heatmap's row names, so the plot above and the
+    squares below start at the same place and both reach the right edge."""
+    metrics=QFontMetrics(small_font())
+    words=list((dashboard.get('heatmap') or {}).get('rowLabels') or [])
+    if dashboard.get('showSummary',True) and dashboard.get('dates'):words+=chart_axis(dashboard)[1]
+    return max((metrics.horizontalAdvance(w) for w in words),default=0)+10
 
 
 def label(text='',role=''):
@@ -92,15 +167,14 @@ class Trend(QWidget):
         series=[(p.get('counted') or p, COLORS.get(p['id'],'#437fc4'))
                 for p in self.data.get('providers',[]) if p.get('available') and p.get('summaryIncluded',True)]
         totals=[sum(p['history'][i] for p in self.parts if i<len(p['history'])) for i in range(len(dates))]
-        peak=max(1,max(totals,default=0));scale=10**math.floor(math.log10(peak))
-        cap=math.ceil(peak/scale)*scale
+        cap,marks=chart_axis(self.data)
         p=QPainter(self);p.setRenderHint(QPainter.Antialiasing)
-        p.setFont(QFont(self.font().family(),8));muted=self.palette().color(QPalette.Mid)
-        left=self.axis;right=self.width()-4;top=9;bottom=self.height()-19
-        for portion in (0,.5,1):
+        p.setFont(small_font());muted=tone()
+        left=self.axis;right=self.width()-1;top=9;bottom=self.height()-19
+        for portion,mark in zip((0,.5,1),marks):
             y=bottom-(bottom-top)*portion
-            p.setPen(muted);p.drawText(QRectF(0,y-7,left-5,14),Qt.AlignLeft|Qt.AlignVCenter,tokens(cap*portion))
-            line=QColor(muted);line.setAlpha(100);p.setPen(QPen(line,1,Qt.DotLine))
+            p.setPen(muted);p.drawText(QRectF(0,y-7,left-5,14),Qt.AlignLeft|Qt.AlignVCenter,mark)
+            p.setPen(QPen(tone(.4),1,Qt.DotLine))
             p.drawLine(QPointF(left,y),QPointF(right,y))
         positions=self.data.get('chartPositions')
         if not positions or len(positions)!=len(dates):positions=[i/max(1,len(dates)-1) for i in range(len(dates))]
@@ -120,36 +194,84 @@ class Trend(QWidget):
 
 
 class Heatmap(QWidget):
-    def __init__(self,data,axis=41):
-        super().__init__();self.data=data;self.axis=axis;self.setMouseTracking(True);self.setAccessibleName('用量热力图')
-        self.setFixedHeight(len(data['rowLabels'])*12+19)
+    """The squares under Summary, as on macOS: one square size in every range, the gaps stretched so each
+    row runs from the label column to the right edge with rows the same gap apart, four shades by rank,
+    and the pointed square described at the bottom left rather than in a tooltip."""
+    CELL=8;TOP=2;CAPTION=17
 
-    def boxes(self):
-        left=self.axis;columns=self.data['columns'];span=self.width()-left-2
-        step=span/max(columns,1);size=min(8,max(3,step-2))
-        return [QRectF(left+(i%columns)*step,2+(i//columns)*12,size,size) for i in range(len(self.data['tokens']))]
+    def __init__(self,data,axis):
+        super().__init__();self.data=data;self.axis=axis;self.pointed=None
+        self.levels=heat_levels(data);self.columns=max(1,data['columns'])
+        self.rows=max(1,-(-len(data['tokens'])//self.columns));self.past=max(0,len(data['tokens'])-data.get('future',0))
+        # Its height follows its width, which the layout and scroll area settle in one pass; setting it
+        # from resizeEvent instead fights the scroll bar appearing and disappearing.
+        policy=QSizePolicy(QSizePolicy.Preferred,QSizePolicy.Fixed);policy.setHeightForWidth(True);self.setSizePolicy(policy)
+        self.setMouseTracking(True);self.setAccessibleName('用量热力图')
+
+    def geometry_for(self,width):
+        size=self.CELL;span=max(size,width-self.axis)
+        pitch=(span-size)/(self.columns-1) if self.columns>1 else 0
+        gap=pitch-size if self.columns>1 else 1.6
+        return size,pitch,size+gap,gap
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self,width):
+        _,_,row,gap=self.geometry_for(width)
+        return round(self.TOP+self.rows*row-gap+self.CAPTION)
+
+    def sizeHint(self):
+        return QSize(330,self.heightForWidth(330))
+
+    def square(self,i):
+        size,pitch,row,_=self.geometry_for(self.width())
+        return QRectF(self.axis+(i%self.columns)*pitch,self.TOP+(i//self.columns)*row,size,size)
+
+    def index_at(self,point):
+        # The nearest square, so the gaps belong to the squares beside them; none for squares still to come.
+        size,pitch,row,gap=self.geometry_for(self.width())
+        bottom=self.TOP+self.rows*row-gap
+        if point.x()<self.axis-1 or point.x()>self.width()+1 or point.y()<self.TOP-1 or point.y()>bottom+1:return None
+        column=round((point.x()-self.axis-size/2)/pitch) if pitch else 0
+        index=min(self.rows-1,max(0,int((point.y()-self.TOP)/row)))*self.columns+min(self.columns-1,max(0,column))
+        return index if index<self.past else None
 
     def paintEvent(self,_):
-        p=QPainter(self);p.setRenderHint(QPainter.Antialiasing)
-        values=self.data['tokens'];peak=max(values,default=0) or 1;future=self.data.get('future',0)
-        for i,(box,n) in enumerate(zip(self.boxes(),values)):
-            color=QColor(TOTAL)
-            color.setAlpha(16 if i>=len(values)-future else 32+round(218*(n/peak)**.45))
-            p.setPen(Qt.NoPen);p.setBrush(color);p.drawRoundedRect(box,1.5,1.5)
-        p.setPen(self.palette().color(QPalette.Mid));p.setFont(QFont(self.font().family(),8))
-        for i,name in enumerate(self.data['rowLabels']):p.drawText(QPointF(0,10+12*i),name)
-        p.drawText(QPointF(0,self.height()-3),self.data.get('notice') or self.data.get('status') or self.data['hint'])
+        p=QPainter(self);p.setRenderHint(QPainter.Antialiasing);font=small_font();p.setFont(font)
+        size,_,row,gap=self.geometry_for(self.width())
+        dark=QApplication.palette().color(QPalette.Window).lightness()<128
+        empty=QColor('#ffffff' if dark else '#000000');empty.setAlphaF(.075 if dark else .06)
+        shades=[empty]+[QColor(TOTAL) for _ in range(4)]
+        for shade,alpha in zip(shades[1:],(.3,.52,.76,1)):shade.setAlphaF(alpha)
+        p.setPen(tone())
+        for r,name in enumerate((self.data.get('rowLabels') or [])[:self.rows]):
+            if name:p.drawText(QRectF(0,self.TOP+r*row+size/2-7,self.axis-4,14),Qt.AlignLeft|Qt.AlignVCenter,name)
+        for i in range(min(len(self.data['tokens']),self.rows*self.columns)):
+            box=self.square(i)
+            if i>=self.past:
+                p.setPen(QPen(shades[0],.8));p.setBrush(Qt.NoBrush);p.drawRoundedRect(box.adjusted(.4,.4,-.4,-.4),1.6,1.6);continue
+            p.setPen(Qt.NoPen);p.setBrush(shades[self.levels[i]]);p.drawRoundedRect(box,1.6,1.6)
+            if i==self.pointed:
+                ring=QColor(self.palette().color(QPalette.WindowText));ring.setAlphaF(.6)
+                p.setPen(QPen(ring,1.2));p.setBrush(Qt.NoBrush);p.drawRoundedRect(box.adjusted(-1,-1,1,1),2.2,2.2)
+        line=self.TOP+self.rows*row-gap+3
+        hint=QFont(font);hint.setPointSizeF(7.5);p.setFont(hint);p.setPen(tone(.7))
+        room=QFontMetrics(hint).horizontalAdvance(self.data['hint'])
+        p.drawText(QRectF(self.width()-room-2,line,room+2,13),Qt.AlignRight|Qt.AlignVCenter,self.data['hint'])
+        caption=heat_detail(self.data,self.pointed) if self.pointed is not None else heat_note(self.data)
+        if caption:
+            p.setFont(font);p.setPen(tone());width=max(0,self.width()-self.axis-room-10)
+            p.drawText(QRectF(self.axis,line,width,13),Qt.AlignLeft|Qt.AlignVCenter,QFontMetrics(font).elidedText(caption,Qt.ElideRight,width))
+
+    def point(self,index):
+        if index!=self.pointed:self.pointed=index;self.update()
 
     def mouseMoveEvent(self,event):
-        for i,box in enumerate(self.boxes()):
-            if box.contains(event.position()):
-                values=self.data
-                if i>=len(values['tokens'])-values.get('future',0):break
-                cost=None if values['requests'][i] and values['unpriced'][i]>=values['requests'][i] else values['costs'][i]
-                text=f"{values['labels'][i]} · {tokens(values['tokens'][i])} Token · {values['requests'][i]} 次 · {cash(cost)}"
-                QToolTip.showText(event.globalPosition().toPoint(),text,self,box.toRect())
-                return
-        QToolTip.hideText()
+        self.point(self.index_at(event.position()))
+
+    def leaveEvent(self,event):
+        self.point(None);super().leaveEvent(event)
 
 
 class Provider(QWidget):
@@ -274,7 +396,9 @@ class TrayPanel(QWidget):
             screen=QApplication.screenAt(self.anchor) or QApplication.primaryScreen()
             geo=screen.availableGeometry()
             self.setFixedWidth(min(380,geo.width()-12))
-            self.setFixedHeight(min(content.sizeHint().height()+6,geo.height()-14))
+            # Wrapped text and the heatmap are as tall as the width makes them.
+            natural=content.heightForWidth(self.width()-2) if content.hasHeightForWidth() else -1
+            self.setFixedHeight(min(max(natural,content.sizeHint().height())+6,geo.height()-14))
             x=min(geo.right()-self.width()+1,max(geo.left(),self.anchor.x()-self.width()+16))
             # The taskbar is usually at the bottom; availableGeometry also covers top/side bars.
             y=geo.bottom()-self.height()+1 if self.anchor.y()>=geo.center().y() else geo.top()
@@ -307,8 +431,11 @@ class TrayPanel(QWidget):
         if d.get('showSummary',True):
             parts=summary_parts(d);requests=sum(p['requests'] for p in parts)
             priced=any(p.get('cost') is not None for p in parts)
+            # "已知" only when a counted source is unavailable or has requests without a price.
+            partial=any(not p.get('available') for p in d['providers'] if p.get('summaryIncluded',True)) \
+                or any((p.get('unpriced') or 0)>0 for p in parts)
             stats=QHBoxLayout()
-            for i,(name,value) in enumerate([('已知 API 估算',cash(sum(p.get('cost') or 0 for p in parts) if priced else None)),
+            for i,(name,value) in enumerate([('已知 API 估算' if partial else 'API 估算',cash(sum(p.get('cost') or 0 for p in parts) if priced else None)),
                                              ('Token 用量',tokens(sum(p['tokens'] for p in parts)) if parts else '—'),
                                              ('请求',f'{requests:,}' if parts else '—')]):
                 col=QVBoxLayout();align=[Qt.AlignLeft,Qt.AlignHCenter,Qt.AlignRight][i]
@@ -320,16 +447,12 @@ class TrayPanel(QWidget):
                 if p.get('summaryIncluded',True) and p['available']:
                     legends.append('<span style="color:'+COLORS.get(p['id'],'#437fc4')+'">━</span> '+escape(p['name']))
             legend=QLabel('　'.join(legends));legend.setWordWrap(True);box.addWidget(legend)
-            heat=d.get('heatmap') or {}
-            peak=max((sum(p['history'][i] for p in parts if i<len(p['history']))
-                      for i in range(len(d['dates']))),default=0)
-            metrics=legend.fontMetrics()
-            axis=max(metrics.horizontalAdvance(word) for word in [tokens(peak),*heat.get('rowLabels',[])])+9
+            axis=label_column(d)
             box.addWidget(Trend(d,axis))
-            if heat:box.addWidget(Heatmap(heat,axis))
+            if d.get('heatmap'):box.addWidget(Heatmap(d['heatmap'],axis))
             if note:=[n for n in (d.get('chartStatus'),d.get('updated')) if n]:
                 info=label(' · '.join(note),'muted');info.setAlignment(Qt.AlignRight);box.addWidget(info)
-        elif d.get('heatmap'):box.addWidget(Heatmap(d['heatmap']))
+        elif d.get('heatmap'):box.addWidget(Heatmap(d['heatmap'],label_column(d)))
         for p in d['providers']:
             box.addWidget(separator())
             box.addWidget(Provider(p,not sharing and d.get('allowCollapse'),p['id'] in d.get('expandedProviders',[]),self.action.emit))

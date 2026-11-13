@@ -149,6 +149,45 @@ class WindowsUiTests(unittest.TestCase):
         Desktop.tray_action(desktop,QSystemTrayIcon.Trigger)
         self.assertEqual(opened,[True])
 
+    def test_heatmap_shades_spacing_and_caption_follow_the_mac_panel(self):
+        from panel import Heatmap,axis_tokens,heat_detail,heat_levels,heat_note
+        h={'columns':24,'rowLabels':['今天'],'labels':['11月13日 Fri %02d:00'%i for i in range(24)],
+           'tokens':[0,100,200,300,400,0]+[0]*18,'requests':[0,1,1,1,2,3]+[0]*18,
+           'costs':[0,.5,0,0,1.25,0]+[0]*18,'unpriced':[0,0,0,0,1,0]+[0]*18,'future':10,'hint':'每格 1 小时'}
+        self.assertEqual(heat_levels(h)[:7],[0,1,2,3,4,1,0])
+        self.assertEqual(heat_detail(h,4),'11月13日 Fri 04:00 · 400 Token · 已知 $1.25 · 2 请求')
+        self.assertEqual(heat_detail(h,1),'11月13日 Fri 01:00 · 100 Token · $0.50 · 1 请求')
+        self.assertEqual(heat_detail(h,6),'11月13日 Fri 06:00 · 无用量')
+        self.assertEqual(heat_note(dict(h,tokens=[0]*24,requests=[0]*24)),'暂无用量')
+        self.assertEqual([axis_tokens(v) for v in (5e8,1.5e9,2e9,0)],['500M','1.5B','2B','0'])
+        week=dict(h,columns=24,rowLabels=['Mon','Tue'],labels=h['labels']*2,tokens=h['tokens']*2,requests=h['requests']*2,
+                  costs=h['costs']*2,unpriced=h['unpriced']*2,future=0)
+        view=Heatmap(week,40);self.addCleanup(view.close);view.resize(340,view.heightForWidth(340))
+        last,below=view.square(23),view.square(24)
+        self.assertAlmostEqual(last.right(),340)
+        self.assertAlmostEqual(below.top()-view.square(0).bottom(),view.square(1).left()-view.square(0).right())
+        self.assertGreater(view.heightForWidth(340),view.heightForWidth(240))
+        self.assertEqual(view.index_at(view.square(4).center()),4)
+        today=Heatmap(h,40);self.addCleanup(today.close);today.resize(340,today.heightForWidth(340))
+        self.assertEqual(today.index_at(today.square(13).center()),13)
+        self.assertIsNone(today.index_at(today.square(20).center()))
+
+    def test_estimate_says_known_only_when_part_of_summary_is_missing(self):
+        from PySide6.QtCore import QPoint
+        from PySide6.QtWidgets import QLabel
+        from panel import TrayPanel
+        def card(name,available=True,unpriced=0):
+            return {'id':name,'name':name,'available':available,'tokens':10,'cost':1.0,'requests':1,'unpriced':unpriced,
+                    'history':[10],'models':[],'output':0,'sessions':1,'status':'运行正常' if available else '未找到记录目录'}
+        def estimate(providers):
+            panel=TrayPanel();self.addCleanup(panel.close)
+            panel.snapshot={'dashboard':{'providers':providers,'dates':['11/13'],'rangeKey':'today'}}
+            panel.show_at(QPoint(800,780))
+            return [l.text() for l in panel.findChildren(QLabel) if l.text().endswith('API 估算')]
+        self.assertEqual(estimate([card('magpie')]),['API 估算'])
+        self.assertEqual(estimate([card('magpie',unpriced=1)]),['已知 API 估算'])
+        self.assertEqual(estimate([card('magpie'),card('claude',available=False)]),['已知 API 估算'])
+
     def test_self_test_reads_history_via_real_backend_and_can_render(self):
         with tempfile.TemporaryDirectory() as tmp:
             out=Path(tmp)/'preview.png'
