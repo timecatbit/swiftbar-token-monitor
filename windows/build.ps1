@@ -67,8 +67,20 @@ $env:QT_QPA_PLATFORM = "offscreen"
 $env:QT_QPA_FONTDIR = Join-Path $env:WINDIR "Fonts"
 $Preview = Join-Path $Build "smoke.png"
 Remove-Item -LiteralPath $Preview -ErrorAction SilentlyContinue
-$Process = Start-Process -FilePath (Join-Path $App "Token Monitor.exe") -ArgumentList @("--self-test", "--preview", ('"' + $Preview + '"')) -Wait -PassThru
-if ($Process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $Preview)) { throw "Packaged Windows smoke test failed." }
+# Each run is bounded and waits for that process only: Start-Process -Wait also waits for every
+# process it leaves behind, and a hung step would otherwise run into the job's time limit unexplained.
+function Invoke-Bounded([string]$What, [string]$File, [string[]]$Arguments, [int]$Seconds) {
+    Write-Host "$(Get-Date -Format HH:mm:ss) $What"
+    $Process = Start-Process -FilePath $File -ArgumentList $Arguments -PassThru
+    $null = $Process.Handle  # keeps the exit code readable once the process has ended
+    if (-not $Process.WaitForExit($Seconds * 1000)) {
+        Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+        throw "$What did not finish within $Seconds seconds."
+    }
+    if ($Process.ExitCode -ne 0) { throw "$What exited with $($Process.ExitCode)." }
+}
+Invoke-Bounded "Smoke test of the built program" (Join-Path $App "Token Monitor.exe") @("--self-test", "--preview", ('"' + $Preview + '"')) 180
+if (-not (Test-Path -LiteralPath $Preview)) { throw "Packaged Windows smoke test drew no preview." }
 
 function Write-Checksum([string]$Path) {
     $Hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -106,19 +118,16 @@ $Shortcut = Join-Path ([Environment]::GetFolderPath("Programs")) "Token Monitor.
 $Entry = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{66818B0F-B59E-45CC-81AA-99315BFB1931}_is1"
 $RunKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 Remove-Item -LiteralPath $Installed -Recurse -Force -ErrorAction SilentlyContinue
-$Process = Start-Process -FilePath $Setup -Wait -PassThru -ArgumentList @(
-    "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/TASKS=autostart",
-    ('/DIR="' + $Installed + '"'), ('/LOG="' + (Join-Path $Build "setup.log") + '"'))
-if ($Process.ExitCode -ne 0) { throw "The installer exited with $($Process.ExitCode)." }
+Invoke-Bounded "Silent install" $Setup @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/TASKS=autostart",
+    ('/DIR="' + $Installed + '"'), ('/LOG="' + (Join-Path $Build "setup.log") + '"')) 300
 if (-not ((Test-Path -LiteralPath $InstalledExe) -and (Test-Path -LiteralPath $Shortcut) -and (Test-Path -LiteralPath $Entry))) {
     throw "The installer left out the program, its Start menu shortcut or its uninstall entry."
 }
 $SignIn = (Get-ItemProperty -LiteralPath $RunKey -Name "TokenMonitor" -ErrorAction SilentlyContinue).TokenMonitor
 if ($SignIn -ne ('"' + $InstalledExe + '" --background')) { throw "The sign-in entry does not start the installed copy." }
-$Process = Start-Process -FilePath $InstalledExe -ArgumentList "--self-test" -Wait -PassThru
-if ($Process.ExitCode -ne 0) { throw "The installed copy failed its smoke test." }
-$Process = Start-Process -FilePath (Join-Path $Installed "unins000.exe") -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") -Wait -PassThru
-if ($Process.ExitCode -ne 0) { throw "The uninstaller exited with $($Process.ExitCode)." }
+Invoke-Bounded "Smoke test of the installed copy" $InstalledExe @("--self-test") 180
+Invoke-Bounded "Silent uninstall" (Join-Path $Installed "unins000.exe") @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
+    ('/LOG="' + (Join-Path $Build "uninstall.log") + '"')) 180
 # The uninstaller finishes from a copy of itself in the temp folder, after this process has returned.
 $Deadline = (Get-Date).AddSeconds(60)
 while (((Test-Path -LiteralPath $InstalledExe) -or (Test-Path -LiteralPath $Shortcut) -or (Test-Path -LiteralPath $Entry)) -and (Get-Date) -lt $Deadline) {
@@ -128,6 +137,7 @@ if ((Test-Path -LiteralPath $InstalledExe) -or (Test-Path -LiteralPath $Shortcut
     throw "Uninstalling left the program, its shortcut or its entry behind."
 }
 if (Get-ItemProperty -LiteralPath $RunKey -Name "TokenMonitor" -ErrorAction SilentlyContinue) { throw "Uninstalling left the sign-in entry behind." }
+Write-Host "$(Get-Date -Format HH:mm:ss) Installer checks passed"
 Remove-Item Env:QT_QPA_PLATFORM, Env:QT_QPA_FONTDIR
 Write-Checksum $Setup
 Write-Output $Setup
