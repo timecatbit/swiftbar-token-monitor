@@ -248,17 +248,25 @@ class ShareCard:FlippedView {
     var counted:[ProviderUsage] {rows.compactMap{$0.summaryPart}}
     var shared:[ProviderUsage] {counted.filter{$0.tokens>0}}
     var pictureHeight:CGFloat {0}
-    // A picture taller than a phone's screen is read filling the screen's width, its top at the top of the
-    // screen, so a notch or Dynamic Island covers the middle of its top. Such pictures start their content
-    // 63pt down: on an iPhone 393pt wide that is 59pt of screen, leaving the island (11pt down, 37pt tall) the
-    // same space below as above. The band holds a pattern of squares; the bottom keeps the plain margin, which
-    // already clears the home indicator. Shorter pictures are shown with bars above and below, and keep the margin.
-    static let phoneTop:CGFloat=63
-    static func phoneInsets(content:CGFloat,margin:CGFloat)->(top:CGFloat,bottom:CGFloat) {
-        (content+margin*2)/width>2 ? (max(margin,phoneTop),margin) : (margin,margin)
+    // Every share picture has a band of its style's pattern above the content and another below the signature.
+    // The top one is 63pt: a long picture is read on a phone filling the screen's width with its top at the top
+    // of the screen, and on an iPhone 393pt wide that is 59pt of screen, leaving the island (11pt down, 37pt
+    // tall) the same space below as above, so whatever it covers is only pattern. The bottom one clears the home
+    // indicator. Patterns also sit beside the estimate, fading toward the figure.
+    static let topBand:CGFloat=63,bottomBand:CGFloat=44
+    // Which way a patch of pattern fades: from its top edge down, from its bottom edge up, or from its right edge leftward.
+    enum Fade {case down,up,left}
+    // How strong the pattern is at a point of a patch: full at the edge it grows from, nothing at the far one.
+    static func fade(_ fading:Fade,x:CGFloat,y:CGFloat,in rect:NSRect)->CGFloat {
+        let t:CGFloat
+        switch fading {
+        case .down:t=(y-rect.minY)/rect.height
+        case .up:t=(rect.maxY-y)/rect.height
+        case .left:t=(rect.maxX-x)/rect.width
+        }
+        return pow(max(0,1-t),0.8)
     }
-    // The band over the top of a tall picture holds only pattern, in the style's own colours, fading out before
-    // the content, so whatever a phone's island covers there hides nothing. Its grain is fixed per day.
+    // The patterns' grain is fixed per day, so a picture drawn twice looks the same.
     var crownSeed:Double {Double(dashboard.date.unicodeScalars.reduce(0){$0+Int($1.value)}%97)}
     static func grain(_ a:Int,_ b:Int,_ seed:Double)->UInt32 {
         var value=UInt32(truncatingIfNeeded:a&*73856093 ^ b&*19349663 ^ Int(seed)&*83492791)
@@ -356,8 +364,7 @@ final class CardShareCard:ShareCard {
         let blocks=rows.isEmpty ? 0 : rows.reduce(0){$0+Self.blockHeight($1)+10}-10
         return Self.inset*2+header+hero+tiles+chart+heatmapHeight+share+blocks
     }
-    private var insets:(top:CGFloat,bottom:CGFloat) {Self.phoneInsets(content:cardHeight+60,margin:Self.margin)}
-    override var pictureHeight:CGFloat {insets.top+cardHeight+60+insets.bottom}
+    override var pictureHeight:CGFloat {Self.topBand+cardHeight+60+Self.bottomBand}
     private static let heatmapWidth=width-margin*2-inset*2
     private var heatmapHeight:CGFloat {heatmap.map{24+Self.heatmapGridHeight($0,width:Self.heatmapWidth)+24} ?? 0}
     static func day(_ iso:String)->String {
@@ -386,15 +393,15 @@ final class CardShareCard:ShareCard {
         return measured<=room ? full : font(max(11,floor(size*room/measured)),weight,rounded:true)
     }
     private var teal:NSColor {dark(self) ? NSColor(srgbRed:0.43,green:0.79,blue:0.75,alpha:1) : NSColor(srgbRed:0.15,green:0.47,blue:0.46,alpha:1)}
-    // The card's band: a halftone of soft dots swelling and shrinking in slow waves, fading toward the card.
-    private func drawHalftone(height:CGFloat,colour:NSColor){
-        let pitch:CGFloat=9,rows=max(1,Int(height/pitch)),columns=Int(bounds.width/pitch)+2,seed=crownSeed
+    // The card's pattern: a halftone of soft dots swelling and shrinking in slow diagonal waves. The waves follow
+    // the picture rather than the patch, so every patch of them belongs to the same field.
+    private func drawHalftone(in rect:NSRect,fading:Fade,colour:NSColor){
+        let pitch:CGFloat=9,seed=crownSeed,rows=max(1,Int(rect.height/pitch)),columns=Int(rect.width/pitch)+2
         for row in 0..<rows {
-            let fade=pow(1-CGFloat(row)/CGFloat(rows+1),0.8),y=CGFloat(row)*pitch+6
+            let y=rect.minY+CGFloat(row)*pitch+pitch/2
             for column in 0..<columns {
-                let x=CGFloat(column)*pitch+(row%2==0 ? 0 : pitch/2)-2
-                // Diagonal swells that rise and fall slowly across the width.
-                let wave=0.5+0.5*sin(Double(x)*0.05-Double(row)*0.75+seed)*(0.65+0.35*cos(Double(x)*0.013-seed*0.7))
+                let x=rect.minX+CGFloat(column)*pitch+(row%2==0 ? 0 : pitch/2)-2,fade=Self.fade(fading,x:x,y:y,in:rect)
+                let wave=0.5+0.5*sin(Double(x)*0.05-Double(y)*0.083+seed)*(0.65+0.35*cos(Double(x)*0.013-seed*0.7))
                 let radius=(0.7+3.3*CGFloat(wave))*fade
                 guard radius>0.5 else{continue}
                 colour.withAlphaComponent(colour.alphaComponent*(0.35+0.65*fade)).setFill()
@@ -411,8 +418,10 @@ final class CardShareCard:ShareCard {
             let centre=NSPoint(x:bounds.width*fx,y:bounds.height*fy)
             NSGradient(starting:c.withAlphaComponent(isDark ? 0.26 : 0.20),ending:c.withAlphaComponent(0))?.draw(fromCenter:centre,radius:0,toCenter:centre,radius:bounds.width*fr,options:[])
         }
-        if insets.top>Self.margin {drawHalftone(height:insets.top-8,colour:teal.withAlphaComponent(isDark ? 0.6 : 0.5))}
-        let card=NSRect(x:Self.margin,y:insets.top,width:bounds.width-Self.margin*2,height:cardHeight),shape=NSBezierPath(roundedRect:card,xRadius:26,yRadius:26)
+        let dots=teal.withAlphaComponent(isDark ? 0.6 : 0.5)
+        drawHalftone(in:NSRect(x:0,y:0,width:bounds.width,height:Self.topBand-8),fading:.down,colour:dots)
+        drawHalftone(in:NSRect(x:0,y:bounds.height-Self.bottomBand+8,width:bounds.width,height:Self.bottomBand-8),fading:.up,colour:dots)
+        let card=NSRect(x:Self.margin,y:Self.topBand,width:bounds.width-Self.margin*2,height:cardHeight),shape=NSBezierPath(roundedRect:card,xRadius:26,yRadius:26)
         NSGraphicsContext.saveGraphicsState()
         let shadow=NSShadow();shadow.shadowColor=NSColor.black.withAlphaComponent(isDark ? 0.45 : 0.09);shadow.shadowBlurRadius=36;shadow.shadowOffset=NSSize(width:0,height:-12);shadow.set()
         (isDark ? NSColor(srgbRed:0.10,green:0.105,blue:0.115,alpha:1) : .white).setFill();shape.fill()
@@ -431,7 +440,11 @@ final class CardShareCard:ShareCard {
         let title=Self.title(dashboard),room=pill.minX-left-10,full=measure(title,font(19,.bold))
         draw(title,x:left,middle:pill.midY,width:room+2,font(full<=room ? 19 : max(15,floor(19*room/full)),.bold),.labelColor)
         y+=44
-        // Hero: the estimate, its dollar sign set small against the figure.
+        // Hero: the estimate, its dollar sign set small against the figure, with dots fading in from the card's
+        // right edge beside it, under the figure.
+        NSGraphicsContext.saveGraphicsState();shape.addClip()
+        drawHalftone(in:NSRect(x:card.maxX-170,y:y-6,width:170,height:94),fading:.left,colour:teal.withAlphaComponent(isDark ? 0.34 : 0.26))
+        NSGraphicsContext.restoreGraphicsState()
         let counted=self.counted,costs=counted.compactMap{$0.cost},partial=counted.contains{$0.cost==nil || $0.unpriced>0}
         draw(partial ? "已知 API 等值估算" : "API 等值估算",NSRect(x:left,y:y,width:width,height:16),font(11.5,.medium),.secondaryLabelColor)
         let hero=NSMutableAttributedString()
@@ -593,8 +606,7 @@ final class TerminalShareCard:ShareCard {
     }
     private static let heatmapWidth=width-margin*2-pad*2
     private var heatmapHeight:CGFloat {heatmap.map{24+Self.heatmapGridHeight($0,width:Self.heatmapWidth)+24} ?? 0}
-    private var insets:(top:CGFloat,bottom:CGFloat) {Self.phoneInsets(content:windowHeight+58,margin:Self.margin)}
-    override var pictureHeight:CGFloat {insets.top+windowHeight+58+insets.bottom}
+    override var pictureHeight:CGFloat {Self.topBand+windowHeight+58+Self.bottomBand}
     // What the picture covers, written as dates: today, a 24-hour window, or first to last day.
     static func span(_ d:Dashboard)->String {
         func numbers(_ value:String)->[Int] {value.split(whereSeparator:{"-T:".contains($0)}).compactMap{Int($0)}}
@@ -615,20 +627,21 @@ final class TerminalShareCard:ShareCard {
                              text:Self.rgb(0.11,0.13,0.15),muted:Self.rgb(0.36,0.40,0.44),comment:Self.rgb(0.52,0.56,0.60),accent:Self.rgb(0.02,0.54,0.46),rule:Self.rgb(0,0,0,0.09))
     }
     private func mono(_ size:CGFloat,_ weight:NSFont.Weight = .regular)->NSFont {NSFont.monospacedSystemFont(ofSize:size,weight:weight)}
-    // The terminal's band: columns of hex digits raining down, each led by a bright head with a fading trail.
-    private func drawRain(height:CGFloat,_ c:Palette){
-        let pitchX:CGFloat=10,pitchY:CGFloat=10,rows=max(1,Int(height/pitchY)),columns=Int(bounds.width/pitchX)+1,seed=crownSeed
+    // The terminal's pattern: columns of hex digits raining down, each led by a bright head with a fading trail.
+    // Columns are keyed by their place in the picture, so every patch of rain belongs to the same field.
+    private func drawRain(in rect:NSRect,fading:Fade,_ c:Palette,brightness:CGFloat=1){
+        let pitch:CGFloat=10,seed=crownSeed,rows=max(1,Int(rect.height/pitch)),columns=Int(rect.width/pitch)+1
         let font=mono(8.5,.medium),digits=Array("0123456789abcdef")
         for column in 0..<columns {
-            let head=Int(Self.grain(column,7,seed)%UInt32(rows+4))
+            let x=rect.minX+CGFloat(column)*pitch,key=Int((x/pitch).rounded()),head=Int(Self.grain(key,7,seed)%UInt32(rows+4))
             for row in 0..<rows {
-                let grain=Self.grain(column,row,seed),behind=head-row
-                let fade=pow(1-CGFloat(row)/CGFloat(rows),1.1)
+                let y=rect.minY+CGFloat(row)*pitch,grain=Self.grain(key,row+Int(rect.minY/pitch),seed),behind=head-row
+                let fade=Self.fade(fading,x:x+pitch/2,y:y+pitch/2,in:rect)
                 // The head is brightest; the trail above it dims; elsewhere a faint scatter of digits.
                 let strength:CGFloat=behind==0 ? 1 : (behind>0 && behind<5 ? 0.62-CGFloat(behind)*0.11 : (grain%3==0 ? 0.14 : 0))
-                guard strength>0 else{continue}
-                let colour=(behind==0 ? c.text : c.accent).withAlphaComponent(strength*fade)
-                draw(String(digits[Int(grain%16)]),NSRect(x:CGFloat(column)*pitchX+1,y:CGFloat(row)*pitchY,width:pitchX,height:pitchY+2),font,colour,.center)
+                guard strength>0,fade>0.02 else{continue}
+                let colour=(behind==0 ? c.text : c.accent).withAlphaComponent(strength*fade*brightness)
+                draw(String(digits[Int(grain%16)]),NSRect(x:x+1,y:y,width:pitch,height:pitch+2),font,colour,.center)
             }
         }
     }
@@ -669,8 +682,9 @@ final class TerminalShareCard:ShareCard {
         let glow=NSPoint(x:bounds.width*0.15,y:60)
         NSGradient(starting:c.accent.withAlphaComponent(isDark ? 0.16 : 0.12),ending:c.accent.withAlphaComponent(0))?.draw(fromCenter:glow,radius:0,toCenter:glow,radius:bounds.width*0.9,options:[])
         // The window: title bar with its three lights, then the session.
-        if insets.top>Self.margin {drawRain(height:insets.top-8,c)}
-        let window=NSRect(x:Self.margin,y:insets.top,width:bounds.width-Self.margin*2,height:windowHeight),shape=NSBezierPath(roundedRect:window,xRadius:12,yRadius:12)
+        drawRain(in:NSRect(x:0,y:0,width:bounds.width,height:Self.topBand-8),fading:.down,c)
+        drawRain(in:NSRect(x:0,y:bounds.height-Self.bottomBand+8,width:bounds.width,height:Self.bottomBand-8),fading:.up,c)
+        let window=NSRect(x:Self.margin,y:Self.topBand,width:bounds.width-Self.margin*2,height:windowHeight),shape=NSBezierPath(roundedRect:window,xRadius:12,yRadius:12)
         NSGraphicsContext.saveGraphicsState()
         let shadow=NSShadow();shadow.shadowColor=NSColor.black.withAlphaComponent(isDark ? 0.55 : 0.14);shadow.shadowBlurRadius=34;shadow.shadowOffset=NSSize(width:0,height:-14);shadow.set()
         c.window.setFill();shape.fill()
@@ -697,7 +711,11 @@ final class TerminalShareCard:ShareCard {
         let title=Self.title(dashboard),room=tag.minX-left-10,full=measure(title,ui(19,.bold))
         draw(title,x:left,middle:tag.midY,width:room+2,ui(full<=room ? 19 : max(15,floor(19*room/full)),.bold),c.text)
         y+=46
-        // The estimate, set like output, with the cursor after it.
+        // The estimate, set like output, with the cursor after it, and rain fading in from the window's right
+        // edge beside it, under the figure.
+        NSGraphicsContext.saveGraphicsState();shape.addClip()
+        drawRain(in:NSRect(x:window.maxX-140,y:y-4,width:140,height:84),fading:.left,c,brightness:0.55)
+        NSGraphicsContext.restoreGraphicsState()
         let counted=self.counted,costs=counted.compactMap{$0.cost},partial=counted.contains{$0.cost==nil || $0.unpriced>0}
         draw(partial ? "// 已知 API 等值估算" : "// API 等值估算",NSRect(x:left,y:y,width:width,height:15),mono(11),c.comment)
         let total=costs.isEmpty ? "—" : "$"+(Self.dollars.string(from:NSNumber(value:costs.reduce(0,+))) ?? "0.00")
