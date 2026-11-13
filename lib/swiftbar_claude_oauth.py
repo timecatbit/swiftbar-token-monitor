@@ -4,7 +4,7 @@ Protocol and lifecycle reference: steipete/CodexBar 458afc60 (MIT), see
 CODEXBAR_LICENSE. Only normalized usage and cooldowns are cached, never tokens.
 """
 from email.utils import parsedate_to_datetime
-import fcntl
+import swiftbar_lock as fcntl
 import hashlib
 import json
 import math
@@ -12,8 +12,6 @@ import os
 from pathlib import Path
 import re
 import select
-import pty
-import pwd
 import shutil
 import signal
 import subprocess
@@ -38,6 +36,7 @@ class OAuthError(Exception):
 
 def keychain_account():
     # Claude Code files its login under the login name, or claude-code-user when the name has other characters.
+    import pwd
     try:name=os.environ.get('USER') or pwd.getpwuid(os.getuid()).pw_name
     except (KeyError,OSError):name=''
     return name if re.fullmatch(r'[A-Za-z0-9._-]+',name) else 'claude-code-user'
@@ -75,7 +74,7 @@ def credentials():
     if ',' in os.environ.get('CLAUDE_CONFIG_DIR',''):raise OAuthError('profile','多个 Claude 目录，请指定单一登录来源')
     root=config_root();default=Path.home()/'.claude'
     data=None;unreadable=None;legacy=False
-    if root==default:
+    if os.name!='nt' and root==default:
         try:
             data=login_document(keychain_data(keychain_account()))
             if data is None:unreadable='Claude Code 钥匙串里的登录无法解析'
@@ -161,6 +160,8 @@ def renewed(before):
 def renew_with_claude(before=None):
     """Let the CLI's startup auth check rotate its own token. No input is sent. Recent CLI builds
     take well over 8 seconds to get there, so wait up to 30 and stop as soon as the login changes."""
+    if os.name=='nt':raise OAuthError('expired','请在 Claude Code 中重新登录，再刷新用量')
+    import pty
     binary=shutil.which('claude')
     if not binary:raise OAuthError('expired','登录已过期，请安装并登录 Claude Code')
     with tempfile.TemporaryDirectory(prefix='swiftbar-claude-auth-') as directory:

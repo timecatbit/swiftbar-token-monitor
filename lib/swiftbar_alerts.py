@@ -69,7 +69,7 @@ def told(marks, alert):
 
 def load(state):
     try:
-        value = json.loads((Path(state) / 'alerts.json').read_text())
+        value = json.loads((Path(state) / 'alerts.json').read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return {}
     marks = value.get('marks') if isinstance(value, dict) and value.get('schema') == 1 else None

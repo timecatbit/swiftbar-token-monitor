@@ -21,7 +21,7 @@ def write_private(path, text):
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700); os.chmod(path.parent, 0o700)
     fd, temporary = tempfile.mkstemp(prefix='.key-', dir=path.parent)
     try:
-        with os.fdopen(fd, 'w') as out: out.write(text)
+        with os.fdopen(fd,'w',encoding='utf-8') as out: out.write(text)
         os.replace(temporary, path)
     finally:
         if os.path.exists(temporary): os.unlink(temporary)
@@ -29,7 +29,7 @@ def write_private(path, text):
 
 def load(state):
     try:
-        data = json.loads((root(state) / 'index.json').read_text())
+        data = json.loads((root(state) / 'index.json').read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return json.loads(json.dumps(EMPTY))
     if not isinstance(data, dict) or data.get('schema') != 1:
@@ -66,7 +66,7 @@ def secret_path(state, provider, key_id):
 
 
 def secret(state, provider, key_id):
-    try: return secret_path(state, provider, key_id).read_text().strip()
+    try: return secret_path(state, provider, key_id).read_text(encoding='utf-8').strip()
     except (OSError, ValueError): return ''
 
 

@@ -57,12 +57,34 @@ jobs:
         with:
           name: token-monitor-package
           path: dist/
+  windows:
+    uses: ./.github/workflows/windows.yml
+    with:
+      expected-tag: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+    permissions:
+      contents: read
+
+  publish:
+    if: github.event_name == 'push'
+    needs: [package, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: token-monitor-package
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: token-monitor-windows-x64
+          path: dist
       - name: Publish release
-        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           version="${GITHUB_REF_NAME#v}"
           gh release create "$GITHUB_REF_NAME" --verify-tag --title "token-monitor $version" \
             --notes-file dist/release-notes.md \
-            "dist/token-monitor-$version.zip" "dist/token-monitor-$version.zip.sha256"
+            "dist/token-monitor-$version.zip" "dist/token-monitor-$version.zip.sha256" \
+            "dist/token-monitor-$version-windows-x64.zip" "dist/token-monitor-$version-windows-x64.zip.sha256"

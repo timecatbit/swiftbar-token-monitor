@@ -16,7 +16,7 @@ import platform
 import uuid
 import xml.etree.ElementTree as ET
 import hashlib
-import fcntl
+import swiftbar_lock as fcntl
 import time
 import shlex
 import socket
@@ -60,7 +60,7 @@ PLUGIN_DIR = os.path.dirname(os.path.abspath(PLUGIN))
 SWIFTBAR_NAME = os.path.basename(PLUGIN).split('.')[0]
 PANEL_APP = os.path.join(PLUGIN_DIR, ".opencodex-panel", "OpenCodexPanel.app")
 # SwiftBar runs every visible file under its plugin folder, so installed assets live in the hidden one.
-ASSET_DIR = next((path for path in (os.path.join(PLUGIN_DIR, ".opencodex-panel", "assets"), os.path.join(PLUGIN_DIR, "assets"))
+ASSET_DIR = next((path for path in (os.path.join(PLUGIN_DIR, ".opencodex-panel", "assets"), os.path.join(PLUGIN_DIR, "assets"), os.path.join(getattr(sys,"_MEIPASS",PLUGIN_DIR), "assets"))
                   if os.path.isdir(path)), os.path.join(PLUGIN_DIR, "assets"))
 DEEPSEEK_LOGO_FILE = os.path.join(ASSET_DIR, "deepseek-logo.svg")
 LOGO_DIR = os.path.join(ASSET_DIR, "logos")
@@ -120,6 +120,7 @@ sources.PRICING_OVERRIDE = os.path.join(STATE_DIR, 'pricing')
 
 # Set while one menu render runs, so it sees a single snapshot of settings and local metadata.
 RENDER_MEMO = None
+DESKTOP = None  # Optional in-process host; SwiftBar keeps its existing shell bridge.
 
 def memoized(key, compute):
     if RENDER_MEMO is None:return compute()
@@ -154,6 +155,7 @@ def local_zone():
     if explicit:
         try: return ZoneInfo(explicit)
         except (ValueError, KeyError): pass
+    if DESKTOP is not None:return DESKTOP.zone
     try:
         with open('/etc/localtime', 'rb') as handle: return ZoneInfo.from_file(handle)
     except (OSError, ValueError): return datetime.now().astimezone().tzinfo
@@ -178,7 +180,7 @@ def ocx_request_log():
 
 CACHE_SCOPE = hashlib.sha256(os.path.abspath(STATE_DIR).encode()).hexdigest()[:16]
 CACHE_DIR = os.path.join(os.environ.get("OCX_CACHE_DIR") or tempfile.gettempdir(),
-                         "opencodex-swiftbar-v5-%s-%s" % (os.getuid(), CACHE_SCOPE))
+                         "opencodex-swiftbar-v5-%s-%s" % (getattr(os,'getuid',lambda:'user')(), CACHE_SCOPE))
 UPDATE_STATUS_CACHE = os.path.join(CACHE_DIR, "badge.json")
 # OpenCodex management endpoints are polled in the background; the health check gates the rest.
 OPENCODEX_ENDPOINTS = {"healthz": ("/healthz", False), "ready": ("/readyz", False), "quota": ("/api/codex-auth/quota", True),
@@ -252,6 +254,7 @@ def refresh_ttl(base):
 
 
 def refresh_cadence():
+    if DESKTOP is not None:return DESKTOP.cadence()
     state=read_cache('panel-state')
     try:
         visible=state.get('visible') is True and isinstance(state.get('pid'),int) and state['pid']>0
@@ -336,6 +339,7 @@ def sync_connection_cache():
 
 
 def macos_dark_mode():
+    if sys.platform!='darwin':return False
     appearance = os.environ.get("OS_APPEARANCE", "").lower()
     if appearance in ("dark", "light"):
         return appearance == "dark"
@@ -550,13 +554,13 @@ def pad_display(value, width):
 
 def komari_public_json(path, body=None):
     # System curl uses macOS TLS/proxy settings and enforces a total transfer deadline.
-    command = ["/usr/bin/curl", "--disable", "--silent", "--show-error", "--fail",
+    command = [("curl.exe" if os.name=="nt" else "/usr/bin/curl"), "--disable", "--silent", "--show-error", "--fail",
                "--connect-timeout", "2", "--max-time", "5", "--max-filesize", "4194304",
                "--header", "Accept: application/json", KOMARI_BASE_URL + path]
     if body is not None:
         command.extend(["--header", "Content-Type: application/json", "--data-binary", json.dumps(body)])
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=6)
+        result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", timeout=6, **swiftbar_runtime.quiet_subprocess())
         if result.returncode:
             return None, (0, "Komari 连接失败", None)
         payload = json.loads(result.stdout)
@@ -999,6 +1003,7 @@ def selected_update_ids():
     return result
 
 def live_app_update_ids():
+    if DESKTOP is not None:return [key for key in selected_update_ids() if key in ('claude-code','codex-cli')]
     return [key for key in selected_update_ids() if key!='opencodex' and key not in MANUAL_UPDATES]
 
 
@@ -1021,6 +1026,7 @@ def update_app_path(key):
 
 
 def installed_app_path(name):
+    if DESKTOP is not None:return None
     for base in ['/Applications', os.path.join(HOME,'Applications')]:
         path=os.path.join(base,name+'.app')
         if os.path.isdir(path):return path
@@ -1104,7 +1110,7 @@ def app_update_probe(key):
         if key in ('claude-code','codex-cli'):
             binary=shutil.which('claude' if key=='claude-code' else 'codex')
             if not binary:row['status']='未安装';return row
-            run=subprocess.run([binary,'--version'],capture_output=True,text=True,timeout=4,check=True)
+            run=subprocess.run(swiftbar_runtime.cli_args(binary,'--version'),capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=4,check=True,**swiftbar_runtime.quiet_subprocess())
             match=re.search(r'\b(\d+(?:\.\d+){1,4}(?:[-+][a-zA-Z0-9.-]+)?)\b',run.stdout)
             row['current']=match[1] if match else ''
             if key=='claude-code':
@@ -1260,8 +1266,9 @@ def update_rows(data):
     oc['available']=bool(badge.get('updateAvailable')) and newer_release(oc['latest'],current)
     oc['status']='有新版本' if oc['available'] else ('已是最新' if current and oc['latest'] else '等待检查')
     state=auto_update_state()
-    oc['automatic']=True
-    if state.get('status')=='running' or (oc['available'] and state.get('target')==oc['latest']):
+    oc['automatic']=DESKTOP is None or DESKTOP.local_proxy(BASE)
+    if not oc['automatic']:pass
+    elif state.get('status')=='running' or (oc['available'] and state.get('target')==oc['latest']):
         oc['status']=state.get('message') or '等待自动更新'
         oc['needsAttention']=state.get('status') in ('failed','blocked')
     elif oc['available']:oc['status']='等待自动更新'
@@ -1281,6 +1288,8 @@ def update_rows(data):
     rows += [{'id':key,'name':UPDATE_NAMES[key],'href':UPDATE_LINKS[key],'status':'等待检查','available':False}
              for key in selected if key!='opencodex' and key not in existing]
     for row in rows:
+        if DESKTOP is not None and row['id'] in ('claude','chatgpt'):
+            row.update(status='在 App 内检查更新',available=False,manual=True)
         app=update_app_path(row['id'])
         if app:row.update(href='file://'+urllib.parse.quote(app),app=True)
         if row['id'] in MANUAL_UPDATES:row.update(status='在 App 内检查更新' if app else '在官网查看更新',available=False,manual=True)
@@ -1289,6 +1298,7 @@ def update_rows(data):
 
 def send_update_notification(rows):
     body='；'.join(row['name']+' '+row['latest'] for row in rows)
+    if DESKTOP is not None:return DESKTOP.notice('应用有新版本',body)
     url='swiftbar://notify?'+urllib.parse.urlencode({'plugin':SWIFTBAR_NAME,'title':'应用有新版本',
          'body':body,'subtitle':'打开星星 → Harness 更新查看','silent':'true',
          'href':'swiftbar://refreshplugin?name='+urllib.parse.quote(SWIFTBAR_NAME)})
@@ -1406,6 +1416,11 @@ def self_update_lines(data):
     """A homepage row under Harness 更新, present only while a newer Token Monitor release exists."""
     release=plugin_update(data);state=self_update_state()
     if not release:return []
+    if DESKTOP is not None:
+        asset='token-monitor-'+release['latest']+'-windows-x64.zip'
+        if not any(a.get('name')==asset for a in release.get('assets',[])):return []
+        return [item(PRODUCT,badge='可更新 '+release['latest'],panelattention=True,sfimage='sparkles'),
+                item('打开 GitHub 发布页',level=1,href=REPOSITORY+'/releases/tag/v'+release['latest'],sfimage='arrow.up.right')]
     latest=release['latest'];running=state.get('status')=='running' and state.get('version')==latest
     failed=state.get('status')=='failed' and state.get('version')==latest
     badge='正在更新' if running else '更新失败' if failed else '可更新 '+latest
@@ -1719,7 +1734,7 @@ def usage_now():
     return datetime.now(local_zone())
 
 def selected_range():
-    value=read_cache('view-range').get('range','today')
+    value=DESKTOP.selected_range() if DESKTOP is not None else read_cache('view-range').get('range','today')
     return value if value in RANGES else 'today'
 
 def range_bounds(key,now=None):
@@ -1958,6 +1973,7 @@ def refresh_resource(source):
     schedule_background_refresh()
 
 def refresh_swiftbar():
+    if DESKTOP is not None:return
     try:subprocess.run(['/usr/bin/open','-g','swiftbar://refreshplugin?name='+urllib.parse.quote(SWIFTBAR_NAME)],capture_output=True,timeout=4)
     except (OSError,subprocess.SubprocessError):pass
 
@@ -2067,6 +2083,7 @@ def alert_notice(alert):
 
 
 def post_notice(subtitle,body):
+    if DESKTOP is not None:return DESKTOP.notice(subtitle,body)
     url='swiftbar://notify?'+urllib.parse.urlencode({'plugin':SWIFTBAR_NAME,'title':PRODUCT,'subtitle':subtitle,'body':body,
          'href':'swiftbar://refreshplugin?name='+urllib.parse.quote(SWIFTBAR_NAME)})
     try:return subprocess.run(['/usr/bin/open','-g',url],capture_output=True,timeout=5).returncode==0
@@ -2118,7 +2135,9 @@ def background_refresh(wait=False):
                 if pricing_due():futures.append(pool.submit(refresh_pricing))
                 for future in futures:
                     future.result()
-            if ocx_configured() and (module_enabled('opencodex') or auto_update_state().get('status')=='running'):auto_update_opencodex()
+            if (DESKTOP is None or DESKTOP.local_proxy(BASE)) and ocx_configured() and (
+                    module_enabled('opencodex') or auto_update_state().get('status')=='running'):
+                auto_update_opencodex()
             if module_enabled('updates'):notify_app_updates(update_rows({}))
             check_usage_alerts()
             collect_cache_garbage()
@@ -2156,11 +2175,15 @@ def collect_cache_garbage(now=None):
 
 
 def schedule_background_refresh():
+    if DESKTOP is not None:
+        DESKTOP.request_refresh('--background-refresh');return
     if any(loader_due(name) for name in external_loaders()) or usage_ranges_due():
         launch_background('--background-refresh')
 
 
 def launch_background(mode):
+    if DESKTOP is not None:
+        DESKTOP.request_refresh(mode);return
     try:
         subprocess.Popen(["/bin/bash", "-p", PLUGIN, mode], stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -2489,7 +2512,7 @@ def chatgpt_lines(data):
 
 
 def detected_modules():
-    return discovery.detect({key:source_path(key) for key in preferences.USAGE},HOME,ocx_configured(),KOMARI_BASE_URL,app_roots=[os.path.join(HOME,'Applications'),'/Applications'],chatgpt_home=chatgpt_home(),configured_subscriptions=view_settings()['configuredSubscriptions'])
+    return discovery.detect({key:source_path(key) for key in preferences.USAGE},HOME,ocx_configured(),KOMARI_BASE_URL,app_roots=[] if DESKTOP is not None else [os.path.join(HOME,'Applications'),'/Applications'],chatgpt_home=chatgpt_home(),configured_subscriptions=view_settings()['configuredSubscriptions'])
 
 
 def detection_help_entries():
@@ -2551,7 +2574,7 @@ def client_connection_entry(key):
         {'label':'修改管理地址…','action':['set-proxy-address'],'children':[]},
         {'label':'选择管理令牌文件…','action':['choose-admin-token'],'children':[]}])
     children.append({'label':'恢复自动读取','action':['reset-client-connection',key],'children':[]})
-    if os.path.isdir(root):children.append({'label':'在 Finder 中打开','symbol':'folder','action':['reveal-client-home',key],'children':[]})
+    if os.path.isdir(root):children.append({'label':'在资源管理器中打开' if DESKTOP is not None else '在 Finder 中打开','symbol':'folder','action':['reveal-client-home',key],'children':[]})
     return {'label':'OpenCodex' if proxy else 'ChatGPT 订阅','value':'已配置' if configured else '未配置','symbol':'network' if proxy else 'person.crop.circle','children':children}
 
 
@@ -2569,7 +2592,7 @@ def module_connections(data=None):
             if configured:
                 locations=source_locations(key)
                 if locations:children.insert(1,location_entry('读取目录' if any(os.path.exists(p) for p in locations) else '默认目录 · 尚未生成',locations))
-                if any(os.path.exists(p) for p in locations):children.insert(2,{'label':'在 Finder 中打开','symbol':'folder','action':['reveal-source',key],'children':[]})
+                if any(os.path.exists(p) for p in locations):children.insert(2,{'label':'在资源管理器中打开' if DESKTOP is not None else '在 Finder 中打开','symbol':'folder','action':['reveal-source',key],'children':[]})
             connections[key]={'label':label,'value':'已配置' if configured else '未配置','symbol':'folder','children':children}
             if key=='magpie':
                 children[0]['label']='来源 · Magpie 本机网关记录' if configured else '未发现 Magpie 或网关记录'
@@ -2603,6 +2626,14 @@ def service_connection_entry(key,data=None):
         children.insert(len(children)-1,{'label':'选择密钥文件…','action':['configure-connection',key],'children':[]})
         return {'label':service.label,'value':'已配置' if configured else '未配置','symbol':'key','children':children}
     if key=='claude-subscription':
+        if DESKTOP is not None:
+            return {'label':service.label,'value':'已配置' if configured else '未配置','symbol':'person.crop.circle','children':[
+                {'label':'Claude Code 登录查询','checked':view_settings()['claudeOAuthUsage'],
+                 'action':['set-claude-oauth','false' if view_settings()['claudeOAuthUsage'] else 'true'],'children':[]},
+                location_entry('Code 登录目录',[str(claude_oauth.config_root())]),
+                location_entry('App 快照文件',[os.path.join(source_path('claude'),'plan-usage-history.json')]),
+                {'label':'选择 Claude 数据目录…','action':['choose-source','claude'],'children':[]},
+                {'label':'打开订阅用量','href':service.url,'children':[]}]}
         return {'label':service.label,'value':'已配置' if configured else '未配置','symbol':'person.crop.circle','children':[
             {'label':'Claude Code 登录查询','checked':view_settings()['claudeOAuthUsage'],'action':['set-claude-oauth','false' if view_settings()['claudeOAuthUsage'] else 'true'],'children':[]},
             location_entry('Code 登录来源',[str(claude_oauth.config_root())]),
@@ -2634,7 +2665,7 @@ def service_connection_entry(key,data=None):
 def apply_client_connection(values,module=None):
     """Only the plugin's overrides change; client files and global environment stay intact."""
     global OCX_HOME,TOKEN_FILE,CONFIG_FILE,SERVICE_LOG,BASE,NATIVE_USAGE_URL
-    connections.write_overrides(STATE_DIR,values);os.environ.update(values)
+    save_overrides(values)
     OCX_HOME=os.path.expanduser(os.environ.get('OCX_HOME') or os.path.join(HOME,'.opencodex'))
     TOKEN_FILE=os.path.expanduser(os.environ.get('OCX_TOKEN_FILE') or os.path.join(OCX_HOME,'admin-api-token'))
     CONFIG_FILE=os.path.join(OCX_HOME,'config.json');SERVICE_LOG=os.path.join(OCX_HOME,'service.log')
@@ -2648,38 +2679,38 @@ def configure_client_action(name,extra):
     if name in ('choose-client-home','reset-client-connection','reveal-client-home') and key not in ('chatgpt','opencodex'):raise ValueError('invalid client')
     if name=='reveal-client-home':
         root=OCX_HOME if key=='opencodex' else chatgpt_home()
-        if os.path.isdir(root):subprocess.run(['/usr/bin/open',root],check=True,timeout=5)
+        if os.path.isdir(root):open_local(root)
         return
     if name=='reset-client-connection':
         values={'OCX_CHATGPT_HOME':''} if key=='chatgpt' else {'OCX_HOME':'','OCX_BASE_URL':'','OCX_TOKEN_FILE':''}
     elif name=='choose-client-home':
         message='选择包含 auth.json 的 ChatGPT 编程客户端配置目录' if key=='chatgpt' else '选择 OpenCodex 配置目录；自动读取其中的运行端口和管理令牌'
-        result=applescript('POSIX path of (choose folder with prompt '+as_literal(message)+')')
-        if result.returncode:return
-        root=os.path.abspath(os.path.expanduser(result.stdout.strip()))
+        chosen=choose_local_path(message,folder=True)
+        if not chosen:return
+        root=os.path.abspath(os.path.expanduser(chosen))
         if not os.path.isdir(root):return
         if key=='chatgpt':
             auth=discovery.read_object(os.path.join(root,'auth.json'));tokens=auth.get('tokens') if isinstance(auth.get('tokens'),dict) else {}
             if auth.get('auth_mode') not in ('chatgpt','chatgptAuthTokens') and not tokens.get('access_token'):
-                applescript('display alert "未找到 ChatGPT 登录" message "请选择已通过 ChatGPT 账户登录的 ChatGPT 编程客户端配置目录。仅 API Key 登录不能读取订阅额度。"');return
+                dialog_error('未找到 ChatGPT 登录','请选择已通过 ChatGPT 账户登录的 ChatGPT 编程客户端配置目录。仅 API Key 登录不能读取订阅额度。');return
             values={'OCX_CHATGPT_HOME':root}
         else:
             if not any(os.path.isfile(os.path.join(root,n)) for n in ('runtime-port.json','admin-api-token','config.json')):
-                applescript('display alert "未找到 OpenCodex 配置" message "请选择包含运行端口、管理令牌或 config.json 的目录。"');return
+                dialog_error('未找到 OpenCodex 配置','请选择包含运行端口、管理令牌或 config.json 的目录。');return
             values={'OCX_HOME':root,'OCX_BASE_URL':'','OCX_TOKEN_FILE':''}
     elif name=='set-proxy-address':
         if extra:raise ValueError('invalid proxy address action')
-        result=applescript('text returned of (display dialog "OpenCodex 管理地址" default answer '+as_literal(BASE)+' buttons {"取消", "保存"} default button "保存" cancel button "取消" with title "连接设置")')
-        if result.returncode:return
-        url=connections.monitor_url(result.stdout.strip())
+        chosen=text_dialog('OpenCodex 管理地址',BASE)
+        if chosen is None:return
+        url=connections.monitor_url(chosen)
         if not url:
-            applescript('display alert "地址无效" message "请填写实际的 http:// 或 https:// 管理地址。"');return
+            dialog_error('地址无效','请填写实际的 http:// 或 https:// 管理地址。');return
         values={'OCX_BASE_URL':url}
     elif name=='choose-admin-token':
         if extra:raise ValueError('invalid token action')
-        result=applescript('POSIX path of (choose file with prompt "选择 OpenCodex 管理令牌文件；仅保存文件路径")')
-        if result.returncode:return
-        filename=os.path.abspath(os.path.expanduser(result.stdout.strip()))
+        chosen=choose_local_path('选择 OpenCodex 管理令牌文件；仅保存文件路径')
+        if not chosen:return
+        filename=os.path.abspath(os.path.expanduser(chosen))
         if not os.path.isfile(filename):return
         values={'OCX_TOKEN_FILE':filename}
     else:raise ValueError('invalid connection action')
@@ -2687,6 +2718,7 @@ def configure_client_action(name,extra):
 
 
 def text_dialog(message,default='',hidden=False,title='连接设置'):
+    if DESKTOP is not None:return DESKTOP.text_dialog(message,default,hidden,title)
     result=applescript('text returned of (display dialog '+as_expr(message)+' default answer '+as_literal(default)+(' with hidden answer' if hidden else '')
                        +' buttons {"取消", "保存"} default button "保存" cancel button "取消" with title '+as_literal(title)+')')
     return result.stdout.strip() if result.returncode==0 else None
@@ -2694,6 +2726,7 @@ def text_dialog(message,default='',hidden=False,title='连接设置'):
 
 def choose_region(title,prompt,first,second):
     """(first, second) are (label, value) pairs; the first one is preselected."""
+    if DESKTOP is not None:return DESKTOP.choose_region(title,prompt,first,second)
     region=applescript('choose from list {'+as_literal(first[0])+', '+as_literal(second[0])+'} with title '+as_literal(title)+' with prompt '+as_literal(prompt)+' default items {'+as_literal(first[0])+'}')
     return {first[0]:first[1],second[0]:second[1]}.get(region.stdout.strip()) if region.returncode==0 else None
 
@@ -2703,13 +2736,13 @@ def ask_option(key,current=''):
     if key=='grok':
         team=text_dialog('xAI Team ID（需要管理密钥，普通推理 API Key 不适用）',current)
         if team is not None and not re.fullmatch(r'[A-Za-z0-9_-]+',team):
-            applescript('display alert "Team ID 无效" message "请填写 xAI 控制台中的 Team ID。"');return None
+            dialog_error('Team ID 无效','请填写 xAI 控制台中的 Team ID。');return None
         return team
     if key=='minimax':return choose_region('MiniMax 套餐','选择密钥所属地区',('国际站','international'),('中国站','china'))
     if key=='qoder-api':
         org=text_dialog('Qoder CN 组织 ID（组织设置网址 qoder.cn/organizations/<组织 ID>/settings 中的那一段）',current)
         if org is not None and not re.fullmatch(r'[A-Za-z0-9_-]+',org):
-            applescript('display alert "组织 ID 无效" message "请填写 Qoder CN 组织设置网址中的组织 ID。"');return None
+            dialog_error('组织 ID 无效','请填写 Qoder CN 组织设置网址中的组织 ID。');return None
         return org
     if key=='kimi-api':return choose_region('Kimi API','选择 Key 所属平台：中国站 platform.moonshot.cn，国际站 platform.moonshot.ai',('中国站','china'),('国际站','international'))
     return ''
@@ -2734,12 +2767,11 @@ def configure_connection(key,clear=False):
         if value is None:return
         url=connections.monitor_url(value)
         if not url:
-            applescript('display alert "地址无效" message "请填写实际面板地址，不使用示例地址、账号密码或查询参数。"');return
+            dialog_error('地址无效','请填写实际面板地址，不使用示例地址、账号密码或查询参数。');return
         values['KOMARI_BASE_URL']=url
     else:
-        response=applescript('POSIX path of (choose file with prompt '+as_literal('选择 '+key+' 的密钥文本文件；只保存路径，不复制或展示密钥。')+')')
-        if response.returncode:return
-        filename=response.stdout.strip()
+        filename=choose_local_path('选择 '+key+' 的密钥文本文件；只保存路径，不复制或展示密钥。')
+        if not filename:return
         if not os.path.isfile(filename):return
         values[names[key][1]]=filename
         option=ask_option(key,os.environ.get({'grok':'XAI_TEAM_ID','qoder-api':'QODER_CN_ORG_ID'}.get(key,''),''))
@@ -2750,8 +2782,7 @@ def configure_connection(key,clear=False):
         if refuse_repeated(key,chosen,{'grok':{'team':option},'qoder-api':{'org':option}}.get(key,{}),named_keys(key)):return
         if option:values[names[key][2]]=option
     previous=[os.environ.get(name,'') for name in names[key] if name.endswith('_FILE')]
-    connections.write_overrides(STATE_DIR,values)
-    os.environ.update(values)
+    save_overrides(values)
     for filename in previous:
         if filename and filename not in values.values() and connections.managed_key(STATE_DIR,filename):
             try:os.unlink(os.path.expanduser(filename))
@@ -2761,7 +2792,7 @@ def configure_connection(key,clear=False):
     if not clear:preferences.update(STATE_DIR,'module',key,'true')
     elif key!='deepseek' and not keystore.entries(STATE_DIR,key):preferences.update(STATE_DIR,'module',key,'false')
     # A newly saved key gets one check right away, so the row shows a result instead of nothing.
-    if not clear and key in accounts.KEY_CHECKS:test_api_key(key)
+    if not clear and key in accounts.KEY_CHECKS:dispatch_key_check(key)
     schedule_background_refresh()
 
 
@@ -2772,19 +2803,19 @@ def add_api_key(provider):
     name=text_dialog('给这把 Key 起个名字',('Key %d'%(len(api_keys(provider))+1)),title='添加 Key')
     if name is None:return
     if not keystore.LABEL.fullmatch(name):
-        applescript('display alert "名字无效" message "请填写 1–24 个字符的名字。"');return
+        dialog_error('名字无效','请填写 1–24 个字符的名字。');return
     note='\n管理员 Key 权限很大，建议在控制台设置过期时间；插件只用它读取花费。' if provider=='claude-api' else ''
     secret=text_dialog({'grok':'xAI 管理密钥（Management API Key）','qoder-api':'Qoder CN 组织 API Key（组织管理员在 设置 → 高级 → API 密钥 创建，仅团队版/企业版）'}.get(provider,service.label+' Key')+'\n只保存在本机仅你可读的文件中，不会显示或上传。'+note,hidden=True,title='添加 Key')
     if secret is None:return
     if not connections.KEY_FORMAT.fullmatch(secret):
-        applescript('display alert "Key 格式无效" message "请粘贴完整的 API Key，不含空格或换行。"');return
+        dialog_error('Key 格式无效','请粘贴完整的 API Key，不含空格或换行。');return
     option=ask_option(provider)
     if option is None:return
     options={'grok':{'team':option},'kimi-api':{'region':option},'qoder-api':{'org':option}}.get(provider,{})
     if refuse_repeated(provider,secret,options):return
     key_id=keystore.add(STATE_DIR,provider,name,secret,options)
     preferences.update(STATE_DIR,'module',provider,'true')
-    if provider in accounts.KEY_CHECKS:test_api_key(provider,key_id)
+    if provider in accounts.KEY_CHECKS:dispatch_key_check(provider,key_id)
     schedule_background_refresh()
 
 
@@ -2793,7 +2824,7 @@ def refuse_repeated(provider,secret,options,keys=None):
     account=key_account(provider,{'id':'new','options':options})
     same=next((e for e in (api_keys(provider) if keys is None else keys)
                if secret and entry_secret(provider,e['id'])==secret and (account[0]=='key' or key_account(provider,e)==account)),None)
-    if same:applescript('display alert "这把 Key 已经添加过" message '+as_literal('与「'+same['label']+'」是同一把 Key，不再重复添加。'))
+    if same:dialog_error('这把 Key 已经添加过','与「'+same['label']+'」是同一把 Key，不再重复添加。')
     return bool(same)
 
 
@@ -2803,7 +2834,7 @@ def rename_api_key(provider,key_id):
     name=text_dialog('重命名这把 Key',entry['label'],title='重命名 Key')
     if name is None:return
     try:keystore.rename(STATE_DIR,provider,key_id,name)
-    except ValueError:applescript('display alert "名字无效" message "请填写 1–24 个字符的名字。"')
+    except ValueError:dialog_error('名字无效','请填写 1–24 个字符的名字。')
 
 
 def set_balance_alert(provider,currency):
@@ -2815,7 +2846,7 @@ def set_balance_alert(provider,currency):
     answer=text_dialog('%s 余额降到多少%s以下时提醒？留空关闭。'%(catalog.BY_KEY[provider].label,unit),'%g'%line if line else '',title='余额提醒')
     if answer is None:return
     try:preferences.update(STATE_DIR,'balance-alert',key,answer.strip().lstrip('¥$').replace(',',''))
-    except ValueError:applescript('display alert "金额无效" message "请填写大于 0 的数字，或留空关闭提醒。"')
+    except ValueError:dialog_error('金额无效','请填写大于 0 的数字，或留空关闭提醒。')
 
 
 def remove_api_key(provider,key_id):
@@ -2915,6 +2946,11 @@ def key_fingerprint(provider,key_id='default'):
 def key_check(provider,key_id='default'):
     row=read_cache('key-checks').get(check_id(provider,key_id))
     return row if isinstance(row,dict) and row.get('key') and row['key']==key_fingerprint(provider,key_id) else None
+
+
+def dispatch_key_check(*args):
+    if DESKTOP is not None:DESKTOP.submit_test(*args)
+    else:test_api_key(*args)
 
 
 def test_api_key(provider,key_id='default'):
@@ -3415,6 +3451,15 @@ def presentation_settings():
     return {key:settings[key] for key in ('revision','visible','appearance','allowCollapse','expandedProviders')}
 
 
+def panel_snapshot(data,dashboard=None,options=None):
+    dashboard=dashboard if dashboard is not None else dashboard_payload(data)
+    return {"schema":1,"project":{"name":PRODUCT,"url":REPOSITORY},"dashboard":dashboard,
+            "entries":resource_panel_entries(data),"rangeOptions":range_options(dashboard['rangeKey']),
+            "moduleOptions":options if options is not None else module_options(data),
+            "appearance":view_settings()['appearance'],"preferences":presentation_settings(),
+            "updateCount":update_attention_count(update_rows(data))}
+
+
 def render(data):
     dashboard=dashboard_payload(data)
     options=module_options(data)
@@ -3428,10 +3473,7 @@ def render(data):
         for provider in dashboard['providers']:
             overview.append(item(provider['name']+' · '+(fmt_tokens(provider['tokens'])+' Token' if provider['available'] else provider['status'])))
         return "\n".join([title(),'---']+[native_menu_line(line) for line in overview+(['---'] if overview else [])+management_lines(data)+['---']+module_menu_lines()])
-    write_json_cache(cache_path("panel-view"), {"schema":1,"project":{"name":PRODUCT,"url":REPOSITORY},"dashboard":dashboard,
-        "entries":resource_panel_entries(data),"rangeOptions":range_options(dashboard['rangeKey']),
-        "moduleOptions":options,"appearance":view_settings()['appearance'],"preferences":presentation_settings(),
-        "updateCount":update_attention_count(update_rows(data))})
+    write_json_cache(cache_path("panel-view"),panel_snapshot(data,dashboard,options))
     return "\n".join([panel_title(title()),'---']+[native_menu_line(line) for line in native_rows])
 
 
@@ -3440,6 +3482,28 @@ def render(data):
 # ---------------------------------------------------------------------------
 def applescript(source):
     return subprocess.run(["/usr/bin/osascript", "-e", source], capture_output=True, text=True)
+
+
+def dialog_error(title,detail):
+    if DESKTOP is not None:DESKTOP.error(title,detail)
+    else:applescript('display alert '+as_literal(title)+' message '+as_literal(detail))
+
+
+def choose_local_path(message,folder=False):
+    if DESKTOP is not None:return DESKTOP.choose_path(message,folder)
+    result=applescript('POSIX path of (choose '+('folder' if folder else 'file')+' with prompt '+as_literal(message)+')')
+    return result.stdout.strip() if result.returncode==0 else None
+
+
+def open_local(path,text=False):
+    if DESKTOP is not None:DESKTOP.open_local(str(path),text)
+    else:subprocess.run(['/usr/bin/open']+(['-t'] if text else [])+[str(path)],check=True,timeout=5)
+
+
+def save_overrides(values):
+    if DESKTOP is not None:DESKTOP.save_overrides(values)
+    else:connections.write_overrides(STATE_DIR,values)
+    os.environ.update(values)
 
 
 def as_literal(text):
@@ -3452,6 +3516,7 @@ def as_expr(text):
 
 
 def confirm(message, detail="", accept="确定"):
+    if DESKTOP is not None:return DESKTOP.confirm(message,detail,accept)
     body = message if not detail else message + "\n\n" + detail
     script = ("display dialog " + as_expr(body)
               + ' with title '+as_literal(PRODUCT)+' buttons {"取消", '+as_literal(accept)+'} default button "取消" with icon caution')
@@ -3460,6 +3525,8 @@ def confirm(message, detail="", accept="确定"):
 
 
 def notify(message, subtitle=""):
+    if DESKTOP is not None:
+        DESKTOP.notice(subtitle,message);return
     script = "display notification " + as_literal(message) + ' with title ' + as_literal(PRODUCT)
     if subtitle:
         script += " subtitle " + as_literal(subtitle)
@@ -3576,10 +3643,12 @@ def run_action(name, extra):
         preferences.update(STATE_DIR,'auto-path',extra[0] if len(extra)==1 else '')
         schedule_background_refresh()
     elif name == 'open-settings':
-        path=connections.ensure_file(STATE_DIR)
-        subprocess.run(['/usr/bin/open','-t',str(path)],check=True,timeout=5)
+        path=DESKTOP.config_file() if DESKTOP is not None else connections.ensure_file(STATE_DIR)
+        open_local(path,text=True)
     elif name == 'open-claude':
         if extra:raise ValueError('invalid app action')
+        if DESKTOP is not None:
+            DESKTOP.open_claude();return 0
         subprocess.run(['/usr/bin/open','-a','Claude'],check=True,timeout=5)
     elif name in ('set-claude-oauth','reauthorize-claude-oauth'):
         reauthorize=name=='reauthorize-claude-oauth'
@@ -3590,6 +3659,8 @@ def run_action(name, extra):
             if reauthorize or not view_settings()['claudeOAuthUsage']:
                 title='重新读取 Claude Code 登录？' if reauthorize else '使用 Claude Code 登录查询用量？'
                 detail='读取 Claude Code 现有登录，仅向 api.anthropic.com 查询订阅用量。无需 Cookie 或模型调用。登录过期时可启动 Code 自检续期，不发送消息。\n凭据只在内存；不写入插件配置或日志。macOS 可能询问钥匙串权限。'
+                if DESKTOP is not None:
+                    detail='读取 Claude Code 本机登录文件，仅向 api.anthropic.com 查询用量。不会读取 Cookie，也不会调用模型。凭据不写入插件配置或日志；登录过期时在 Claude Code 重新登录。'
                 if not confirm(title,detail,accept='重新读取' if reauthorize else '启用'):return
             preferences.update(STATE_DIR,'claude-oauth','true')
             # Renewal can take half a minute, so the background worker does it, as a retry.
@@ -3639,32 +3710,35 @@ def run_action(name, extra):
         if not command or key not in selected_update_ids() or not module_enabled('updates'):raise ValueError('invalid update target')
         binary=shutil.which(command)
         if not binary:raise ValueError('CLI not installed')
+        if DESKTOP is not None:
+            DESKTOP.update_cli(binary,key);return 0
         helptext=subprocess.run([binary,'--help'],capture_output=True,text=True,check=True,timeout=5).stdout
         if not re.search(r'^\s+update(?:\s|\|)',helptext,re.M):
-            applescript('display alert "当前版本不支持 update 命令" message "请通过官方安装方式更新。"');return
+            dialog_error('当前版本不支持 update 命令','请通过官方安装方式更新。');return
         refresh_url='swiftbar://refreshplugin?name='+urllib.parse.quote(SWIFTBAR_NAME)
         terminal(terminal_jobs.update_command(binary,key,STATE_DIR,refresh_url))
     elif name == 'open-cli-update-log':
         if extra or not module_enabled('updates'):raise ValueError('invalid update log action')
         path=terminal_jobs.latest_log(STATE_DIR,selected_update_ids())
-        if path:subprocess.run(['/usr/bin/open','-t',str(path)],check=True,timeout=5)
+        if path:open_local(path,text=True)
     elif name == 'reveal-source':
         key=extra[0] if len(extra)==1 else ''
         if key not in preferences.USAGE:raise ValueError('invalid source')
         locations=[p for p in source_locations(key) if os.path.exists(p)]
-        if locations:subprocess.run(['/usr/bin/open',locations[0] if os.path.isdir(locations[0]) else os.path.dirname(locations[0])],check=True,timeout=5)
+        if locations:open_local(locations[0] if os.path.isdir(locations[0]) else os.path.dirname(locations[0]))
     elif name == 'choose-source':
         key=extra[0] if extra else ''
         if key not in preferences.USAGE:raise ValueError('invalid source')
         prompt='选择 Claude App 数据目录（包含 claude-code-sessions 或 plan-usage-history.json）' if key=='claude' else '选择 '+key+' 的用量记录目录'
-        response=applescript('POSIX path of (choose folder with prompt '+as_literal(prompt)+')')
-        if response.returncode==0:
-            preferences.update(STATE_DIR,'path',key,response.stdout.strip());schedule_background_refresh()
+        chosen=choose_local_path(prompt,folder=True)
+        if chosen:
+            preferences.update(STATE_DIR,'path',key,chosen);schedule_background_refresh()
     elif name == "set-range":
         key=extra[0] if extra else "today"
         if key not in RANGES:raise ValueError("invalid range")
-        write_json_cache(cache_path("view-range"),{"schema":1,"range":key})
-        if cache_due(read_cache(range_cache_name(key)),refresh_ttl(60)):
+        if DESKTOP is not None:DESKTOP.save_range(key)
+        else:write_json_cache(cache_path("view-range"),{"schema":1,"range":key})
+        if DESKTOP is not None or cache_due(read_cache(range_cache_name(key)),refresh_ttl(60)):
             launch_background('--refresh-range')
     elif name == "refresh":
         invalidate_caches([range_cache_name()] + list(EXTERNAL_TTLS) + list(named_key_loaders()))
@@ -3753,18 +3827,21 @@ def run_action(name, extra):
         api_action("/api/codex-auth/failover", "PUT", {"threshold": int(threshold or 1)},
                    "失败换账号阈值已设为 " + (threshold if threshold != "0" else "不自动换"), "设置失败")
     elif name == "copy-url":
-        subprocess.run(["/usr/bin/pbcopy"], input=BASE.encode("utf-8"))
+        if DESKTOP is not None:DESKTOP.copy(BASE)
+        else:subprocess.run(["/usr/bin/pbcopy"], input=BASE.encode("utf-8"))
         notify("已复制管理地址")
     elif name == "copy-token":
         token = admin_token()
         if token:
-            subprocess.run(["/usr/bin/pbcopy"], input=token.encode("utf-8"))
+            if DESKTOP is not None:DESKTOP.copy(token)
+            else:subprocess.run(["/usr/bin/pbcopy"], input=token.encode("utf-8"))
             notify("已复制管理令牌")
         else:
             notify("没有找到管理令牌", subtitle=TOKEN_FILE)
     elif name == "open-home":
-        subprocess.run(["/usr/bin/open", OCX_HOME])
+        open_local(OCX_HOME)
     elif name == "logs":
+        if DESKTOP is not None:open_local(SERVICE_LOG,text=True);return 0
         terminal("tail -n 100 -f " + shlex.quote(SERVICE_LOG))
     return 0
 

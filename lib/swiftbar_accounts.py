@@ -20,7 +20,7 @@ def credential(name):
     if value: return value
     filename = os.environ.get(name+'_FILE', '')
     if not filename: return ''
-    try: return Path(filename).expanduser().read_text().strip()
+    try: return Path(filename).expanduser().read_text(encoding='utf-8').strip()
     except OSError: return ''
 
 

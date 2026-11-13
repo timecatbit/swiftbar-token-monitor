@@ -17,6 +17,9 @@ SwiftBar 菜单栏插件：在一个原生面板里查看各 AI 编程工具的 
 
 ## 安装
 
+- **Windows**：独立的任务栏托盘应用，无需 SwiftBar。见 [Windows 使用和构建说明](windows/README.md)。
+- **macOS**：继续使用下方的 SwiftBar 安装方式。
+
 需要 macOS 13+ 和 Python 3.9+。
 
 **第一步：安装 SwiftBar。** Token Monitor 是 SwiftBar 插件，先装好 SwiftBar：

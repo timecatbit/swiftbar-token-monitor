@@ -22,6 +22,21 @@ def read_object(path, limit=10*1024*1024):
 
 
 def default_root(home):
+    if os.name=='nt':
+        home=Path(home)
+        roaming=Path(os.environ.get('APPDATA') or home/'AppData/Roaming')
+        local=Path(os.environ.get('LOCALAPPDATA') or home/'AppData/Local')
+        classic=roaming/'Claude';packages=local/'Packages'
+        roots=[classic,*(path for family in ('Claude_*','AnthropicPBC.Claude_*')
+                         for path in sorted(packages.glob(family+'/LocalCache/Roaming/Claude')))]
+        candidates=[]
+        for root in roots:
+            stamps=[]
+            for name in ('config.json','claude-code-sessions','plan-usage-history.json'):
+                try:stamps.append((root/name).stat().st_mtime)
+                except OSError:pass
+            if stamps:candidates.append((max(stamps),root))
+        return max(candidates,key=lambda pair:pair[0])[1] if candidates else classic
     return Path(home)/'Library/Application Support/Claude'
 
 

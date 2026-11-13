@@ -50,7 +50,7 @@ def read(directory):
     defaults = {'schema': 1, 'visible': list(DEFAULT_VISIBLE), 'appearance': 'glass', 'paths': {}, 'allowCollapse': False, 'expandedProviders': [], 'revision': 0, 'configuredSubscriptions': [], 'claudeLiveUsage': False, 'claudeOAuthUsage': False,
                 'usageAlert': 90, 'resetReminder': False, 'balanceAlerts': {}}
     try:
-        value = json.loads((Path(directory) / 'preferences.json').read_text())
+        value = json.loads((Path(directory) / 'preferences.json').read_text(encoding='utf-8'))
         if not isinstance(value, dict) or value.get('schema') != 1:
             return defaults
         visible = value.get('visible')
@@ -98,7 +98,7 @@ def write(directory, value):
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd, temporary = tempfile.mkstemp(prefix='.preferences-', dir=root)
     try:
-        with os.fdopen(fd, 'w') as handle:
+        with os.fdopen(fd,'w',encoding='utf-8') as handle:
             json.dump(value, handle, ensure_ascii=False)
         # read() fell back to defaults for a file it couldn't use; keep the user's original before replacing it.
         files.keep_unreadable(root / 'preferences.json')

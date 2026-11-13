@@ -71,3 +71,6 @@
 - 配置与凭据必须留在本机。不要提交 `config.local.sh`、运行缓存、日志、SQLite 数据或含私人用量的截图。
 - 安装使用 `scripts/install.py`，保留备份与本机状态。备份只留最近 5 份：新备份写完后才删除更早的安装备份（目录名为 `YYYYMMDD-HHMMSS-xxxxxx` 的），其他目录（removed-plugins 等）和链接不动，删不掉就留到下次，不影响安装。新的面板、lib、资源与 HTTP 组件先在 `.opencodex-panel/.install-*` 完整暂存并校验签名，通过后才关闭面板、逐个整体改名替换（不合并进旧目录）；发布入口前任何一步失败都把旧版放回，不能留下新旧混装。不要复制工作聊天里的历史目录作为新的维护源。
 - 公开发布包由 `scripts/package.py` 生成 `token-monitor-<版本>.zip`：预编译的通用面板放在 `build/`，`install.py` 与入口同在包根目录，不含按解释器准备的 HTTP 组件（安装时在用户机器上准备）。推送 `v<版本>` 标签后 `.github/workflows/release.yml` 在 macOS 26 上检查、打包、用空插件目录试装再发布 Release；版本号须与 `VERSION`、`xbar.version` 和 CHANGELOG 一致。发布包安装同样不得引用包目录。
+
+- Windows 入口在 `windows/token_monitor.py`，独立托盘、无 SwiftBar 依赖。复用 Python 数据源和 `panel_snapshot`，不在 Windows 面板重做统计或去重。UI 线程只负责显示、确认和表单；后台串行刷新、保留前次快照，统计范围在对应数据准备好后与标题一起发布。仅执行本机生成的受支持动作，不调用 macOS 钥匙串、AppleScript 或 SwiftBar URL。
+- Windows 状态保存在用户的 LocalAppData，启动项只在用户勾选后写 HKCU；启动后单实例。Windows 构建及离线冒烟测试通过 `windows/build.ps1` 与 Windows CI。真实托盘定位、键鼠及深浅色另外在 Windows 桌面核对。

@@ -15,3 +15,5 @@ __pycache__/
 *.app/
 *.zip
 *token.local*
+**/config.local.json
+.venv/

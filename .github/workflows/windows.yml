@@ -1,0 +1,53 @@
+name: Windows tray
+
+on:
+  pull_request:
+    paths:
+      - "windows/**"
+      - "lib/**"
+      - "tests/test_windows.py"
+      - ".github/workflows/windows.yml"
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      expected-tag:
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  tray:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: "1"
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+      - name: Install build dependencies
+        run: python -m pip install -r windows/requirements.txt pyinstaller==6.16.0
+      - name: Verify Windows adapters and panel
+        run: python -m unittest discover -s tests -p test_windows.py -v
+      - name: Build and smoke test the standalone exe
+        env:
+          EXPECTED_TAG: ${{ inputs.expected-tag }}
+        run: ./windows/build.ps1 -ExpectedTag $env:EXPECTED_TAG
+      - uses: actions/upload-artifact@v4
+        with:
+          name: token-monitor-windows-x64
+          path: |
+            dist/*-windows-x64.zip
+            dist/*-windows-x64.zip.sha256
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: token-monitor-windows-smoke
+          path: build/windows/smoke.png
+          if-no-files-found: error

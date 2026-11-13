@@ -9,16 +9,17 @@ import math
 import os
 from pathlib import Path
 import re
-import select
+import queue
 import shutil
 import sqlite3
 import subprocess
+import sys
 import threading
 import time
 from datetime import datetime, timezone
 
 from swiftbar_time import parse_iso
-from swiftbar_runtime import activate_vendor
+from swiftbar_runtime import activate_vendor, cli_args, quiet_subprocess
 
 
 def number(value):
@@ -81,9 +82,9 @@ def pricing(name):
     copy among the one installed with the plugin and the one downloaded later."""
     if name not in PRICING:
         tables = []
-        for folder in (Path(__file__).parent, PRICING_OVERRIDE):
+        for folder in (Path(sys._MEIPASS)/'lib' if hasattr(sys,'_MEIPASS') else Path(__file__).parent, PRICING_OVERRIDE):
             if not folder: continue
-            try: data = json.loads((Path(folder)/name).read_text())
+            try: data = json.loads((Path(folder)/name).read_text(encoding='utf-8'))
             except (OSError, ValueError): continue
             if valid_pricing(name, data): tables.append(data)
         PRICING[name] = max(tables, key=committed, default={})
@@ -290,7 +291,8 @@ def zstd_codec():
         try:
             from backports import zstd
         except ImportError:
-            return None
+            try:import zstandard as zstd
+            except ImportError:return None
     return zstd
 
 
@@ -298,7 +300,8 @@ def _stream(path):
     if path.suffix not in ('.zstd','.zst'):
         return path.open('rb'), None, None
     if codec:=zstd_codec():
-        return codec.ZstdFile(path, 'rb'), None, None
+        stream=codec.ZstdFile(path,'rb') if hasattr(codec,'ZstdFile') else codec.open(path,'rb')
+        return stream,None,None
     binary = shutil.which('zstd')
     if binary:
         command = [binary, '-dc', '--', str(path)]
@@ -306,7 +309,7 @@ def _stream(path):
         command = [shutil.which('node'), '-e', "require('fs').createReadStream(process.argv[1]).pipe(require('zlib').createZstdDecompress()).pipe(process.stdout)", str(path)]
     else:
         raise RuntimeError('读取压缩日志需要 zstd 或支持 Zstandard 的 Node.js')
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, **quiet_subprocess())
     timer = threading.Timer(30, process.kill); timer.daemon = True; timer.start()
     return process.stdout, process, timer
 
@@ -588,26 +591,39 @@ def chatgpt_account(binary=None, home=None):
     if not binary: return {'state': '未安装 ChatGPT 编程客户端', 'windows': []}
     environment = os.environ.copy()
     if home: environment['CODEX_HOME'] = str(home)
-    process = subprocess.Popen([binary, 'app-server'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=environment)
-    buffer = b''; sequence = 0; deadline = time.monotonic()+12
+    try:
+        process = subprocess.Popen(cli_args(binary,'app-server'), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL, env=environment, **quiet_subprocess())
+    except (OSError,ValueError):
+        return {'error':'无法启动 ChatGPT 编程客户端'}
+    # On Windows select() accepts sockets only. Read complete frames on a pipe
+    # thread; the caller still has one deadline for the whole handshake.
+    incoming=queue.Queue(maxsize=32);stop=threading.Event()
+    def read_frames():
+        try:
+            while not stop.is_set():
+                raw=process.stdout.readline(1024*1024+1)
+                if len(raw)>1024*1024:raw=b''
+                while not stop.is_set():
+                    try:incoming.put(raw,timeout=.1);break
+                    except queue.Full:continue
+                if not raw:break
+        except (OSError,ValueError):pass
+    reader=threading.Thread(target=read_frames,daemon=True);reader.start()
+    sequence=0;deadline=time.monotonic()+12
     def send(value):
         process.stdin.write((json.dumps(value)+'\n').encode()); process.stdin.flush()
     def call(method, params=None):
-        nonlocal buffer, sequence
-        sequence += 1; request_id = sequence
-        send({'id':request_id, 'method':method, 'params':params or {}})
-        while time.monotonic() < deadline:
-            if b'\n' not in buffer:
-                if not select.select([process.stdout], [], [], max(0, deadline-time.monotonic()))[0]: break
-                data = os.read(process.stdout.fileno(), 65536)
-                if not data: break
-                buffer += data
-            while b'\n' in buffer:
-                line, buffer = buffer.split(b'\n',1)
-                try: response = json.loads(line)
-                except ValueError: continue
-                if response.get('id') == request_id:
-                    return response.get('result')
+        nonlocal sequence
+        sequence+=1;request_id=sequence
+        send({'id':request_id,'method':method,'params':params or {}})
+        while time.monotonic()<deadline:
+            try:line=incoming.get(timeout=max(0,deadline-time.monotonic()))
+            except queue.Empty:break
+            if not line:break
+            try:response=json.loads(line)
+            except ValueError:continue
+            if isinstance(response,dict) and response.get('id')==request_id:return response.get('result')
         return None
     try:
         if call('initialize', {'clientInfo': {'name':'swiftbar_token_monitor','title':'SwiftBar Token Monitor','version':'5.0.0'}}) is None:
@@ -635,9 +651,11 @@ def chatgpt_account(binary=None, home=None):
     except (OSError, ValueError, subprocess.SubprocessError):
         return {'error':'额度暂不可用'}
     finally:
+        stop.set()
         if process.poll() is None: process.terminate()
         try: process.wait(timeout=2)
         except subprocess.TimeoutExpired: process.kill(); process.wait()
+        reader.join(timeout=2)
         process.stdin.close(); process.stdout.close()
 
 def workbuddy_event(row, state):

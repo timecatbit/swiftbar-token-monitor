@@ -6,6 +6,7 @@ summary are kept, never the rest of the line or the log. Format as observed by T
 (MIT) for Qoder CN 0.4.x (com.qodercn.app.stable).
 """
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -21,7 +22,8 @@ NO_RESET = 4102444800
 
 
 def log_roots(home):
-    base = Path(home) / 'Library' / 'Application Support'
+    base = (Path(os.environ.get('APPDATA') or Path(home)/'AppData/Roaming') if os.name=='nt'
+            else Path(home)/'Library'/'Application Support')
     return [base / 'com.qodercn.app.stable' / 'logs', base / 'QoderCN' / 'logs']
 
 

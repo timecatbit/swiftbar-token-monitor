@@ -35,7 +35,8 @@ def release_notes(number):
     name = 'token-monitor-' + number
     install = ('先装好 SwiftBar，再在终端运行：\n\n```sh\ncd ~/Downloads\n'
                'curl -fLO %s/releases/download/v%s/%s.zip\nditto -x -k %s.zip .\npython3 %s/install.py\n```\n\n'
-               '已安装旧版的，在主页“Harness 更新”下方点“更新到 %s”即可。\n\n'
+               '已安装 macOS 旧版的，在主页“Harness 更新”下方点“更新到 %s”即可。\n\n'
+               'Windows：下载带 windows-x64 后缀的 ZIP，完整解压后打开 Token Monitor.exe。\n\n'
                % (REPOSITORY, number, name, name, name, number))
     return install + changes.group(1).strip() + '\n'
 

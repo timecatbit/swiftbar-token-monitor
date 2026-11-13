@@ -36,7 +36,7 @@ def write(path,value):
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
     fd,tmp=tempfile.mkstemp(prefix='.'+path.name,dir=path.parent)
     try:
-        with os.fdopen(fd,'w') as f:json.dump(value,f,ensure_ascii=False)
+        with os.fdopen(fd,'w',encoding='utf-8') as f:json.dump(value,f,ensure_ascii=False)
         os.replace(tmp,path)
     finally:
         if os.path.exists(tmp):os.unlink(tmp)
@@ -113,7 +113,7 @@ def install(state,settings=None,python=None):
     current=read(settings)
     if settings.exists() and not current:
         # {} is a valid empty settings object; malformed files must never be replaced.
-        if json.loads(settings.read_text())!={}:raise ValueError('Claude 设置格式异常')
+        if json.loads(settings.read_text(encoding='utf-8'))!={}:raise ValueError('Claude 设置格式异常')
     if enabled(state):
         shutil.copyfile(__file__,state/BRIDGE);os.chmod(state/BRIDGE,0o700);return
     original=current.get('statusLine')

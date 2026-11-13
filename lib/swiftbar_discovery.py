@@ -14,7 +14,7 @@ from swiftbar_config import monitor_url
 
 def read_object(path):
     try:
-        value=json.loads(Path(path).read_text())
+        value=json.loads(Path(path).read_text(encoding='utf-8'))
         return value if isinstance(value,dict) else {}
     except (OSError,ValueError):return {}
 
@@ -90,7 +90,7 @@ def initialize(directory, detected):
     import tempfile
     fd,temporary=tempfile.mkstemp(prefix='.discovery-',dir=root)
     try:
-        with os.fdopen(fd,'w') as out:json.dump(current,out,ensure_ascii=False)
+        with os.fdopen(fd,'w',encoding='utf-8') as out:json.dump(current,out,ensure_ascii=False)
         try:os.link(temporary,target)
         except FileExistsError:return False  # Don't overwrite a concurrent manual choice.
         return True
