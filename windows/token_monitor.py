@@ -365,6 +365,10 @@ def main():
         import ctypes
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('timecatbit.TokenMonitor')
     app=QApplication(sys.argv[:1]);app.setQuitOnLastWindowClosed(False);app.setApplicationName('Token Monitor')
+    if os.name=='nt':
+        # The text is Simplified Chinese. Without a named CJK face, Windows outside a Chinese locale falls
+        # back to a Japanese font, which lacks forms like 请 and 时 and draws the rest in Japanese shapes.
+        font=app.font();font.setFamilies(['Segoe UI','Microsoft YaHei UI','Microsoft YaHei']);app.setFont(font)
     if options.self_test:
         with tempfile.TemporaryDirectory(prefix='token-monitor-smoke-') as temp:
             state=Path(temp)
