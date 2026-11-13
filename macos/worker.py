@@ -1,5 +1,6 @@
 """Private worker for the native macOS app; the SwiftBar plugin keeps its own entry."""
 import json
+import os
 from pathlib import Path
 import sys
 import time
@@ -21,6 +22,8 @@ def main(args):
         print(json.dumps({'snapshot':backend.cache_path('panel-view')}))
         return 0
     if args==['smoke-test']:
+        # The test rewrites the module selection, so it runs only in the build's private home.
+        if os.environ.get('TOKEN_MONITOR_SMOKE_TEST')!='1':return 2
         root=Path(backend.STATE_DIR)/'smoke-fixture';root.mkdir(parents=True,exist_ok=True)
         (root/'usage.jsonl').write_text(json.dumps({'t':time.time()-10,'agent':'codex','provider':'test','model':'gpt-5.4','in':1230,'out':4})+'\n',encoding='utf-8')
         settings=backend.preferences.read(backend.STATE_DIR)

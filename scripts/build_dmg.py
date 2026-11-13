@@ -55,7 +55,7 @@ def sign(app, identity):
 def smoke(app, root):
     """Use a private temporary home and allow no automatic network checks in this test."""
     home=root/'home';home.mkdir()
-    env={'HOME':str(home),'PATH':'/usr/bin:/bin','OCX_SELF_UPDATES':'0','OCX_PRICING_UPDATES':'0',
+    env={'HOME':str(home),'PATH':'/usr/bin:/bin','OCX_SELF_UPDATES':'0','OCX_PRICING_UPDATES':'0','TOKEN_MONITOR_SMOKE_TEST':'1',
          'OCX_STATE_DIR':str(root/'private-state'),'OCX_MAC_CACHE_DIR':str(root/'private-cache')}
     worker=app/'Contents/Resources/token-monitor-worker.sh'
     subprocess.run([str(worker),'smoke-test'],env=env,check=True,timeout=30)
