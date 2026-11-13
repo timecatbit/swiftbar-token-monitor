@@ -1356,7 +1356,9 @@ def self_update_web():
         if not match:return None
         version=match[1]
         if version_tuple(version)<=version_tuple(VERSION):return {'latest':version,'page':page,'assets':[]}
-        name='token-monitor-%s.zip'%version;url=REPOSITORY+'/releases/download/v%s/%s'%(version,name)
+        # The Windows app looks for its own archive, which a release lists beside the macOS one.
+        name='token-monitor-%s%s.zip'%(version,'-windows-x64' if DESKTOP is not None else '')
+        url=REPOSITORY+'/releases/download/v%s/%s'%(version,name)
         fields=download(url+'.sha256',4096).decode('ascii').split()
         if len(fields)!=2 or fields[1].removeprefix('*')!=name or not re.fullmatch(r'[0-9a-f]{64}',fields[0]):
             return None

@@ -100,6 +100,14 @@ class UpdateTests(unittest.TestCase):
   # A missing or wrong checksum does not turn a failed lookup into an update offer.
   with patch.object(self.m.urllib.request,'urlopen',side_effect=[blocked,response]),patch.object(self.m,'download',return_value=(digest+'  wrong.zip').encode()):
    self.assertEqual(self.m.self_update_load(),(None,(403,'检查失败',None)))
+  # The Windows app checks for its own archive, so a rate-limited lookup still offers it the release.
+  windows='token-monitor-99.0.0-windows-x64.zip'
+  with patch.object(self.m,'DESKTOP',object()),patch.object(self.m.urllib.request,'urlopen',side_effect=[blocked,response]),\
+       patch.object(self.m,'download',return_value=(digest+'  '+windows+'\n').encode()) as download:
+   release,error=self.m.self_update_load()
+   self.assertIsNone(error)
+   download.assert_called_once_with(repo+'/releases/download/v99.0.0/'+windows+'.sha256',4096)
+   self.assertTrue(any('可更新 99.0.0' in row for row in self.m.self_update_lines({'self_update':release})))
 
  def test_self_update_verifies_the_archive_and_runs_its_installer(self):
   import hashlib,io,zipfile
