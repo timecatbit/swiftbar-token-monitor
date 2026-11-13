@@ -1694,7 +1694,7 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
         let alert=NSAlert();alert.messageText="Token Monitor "+version;alert.informativeText="macOS 独立版 · minicoke"
         alert.addButton(withTitle:"好");alert.addButton(withTitle:"发布与更新")
         activateForPanel()
-        if alert.runModal() == NSApplication.ModalResponse.alertSecondButtonReturn,let url=URL(string:"https://github.com/timecatbit/swiftbar-token-monitor/releases"){NSWorkspace.shared.open(url)}
+        if alert.runModal() == NSApplication.ModalResponse.alertSecondButtonReturn,let url=URL(string:"https://github.com/timecatbit/swiftbar-token-monitor/releases"){NSWorkspace.shared.open(url)}else{returnFocus()}
     }
     @objc private func quitStandalone(){NSApp.terminate(nil)}
     private func observeSnapshot(){
@@ -1750,10 +1750,11 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
     }
     // Opening the app (the star) activates it. On launch that comes before the panel has been built, so
     // the first activation is left alone; later, if it lands after the panel closed, focus goes straight
-    // back. A short wait tells a reopen that shows the panel from one that hides it.
+    // back. A short wait tells a reopen that shows the panel from one that hides it. A dialog the app is
+    // showing (About, a failure notice) keeps the focus it was opened with.
     func applicationDidBecomeActive(_ notification:Notification){
         if firstActivation{firstActivation=false;return}
-        DispatchQueue.main.asyncAfter(deadline:.now()+0.6){[weak self] in guard let self,!self.panel.isVisible else{return};self.returnFocus()}
+        DispatchQueue.main.asyncAfter(deadline:.now()+0.6){[weak self] in guard let self,!self.panel.isVisible,NSApp.modalWindow==nil else{return};self.returnFocus()}
     }
     func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{if macHost != nil{openStandalone(modules:false);return false};let requested=requestedMode();if panel.isVisible && (requested == nil || requested==managerOnly){hide()}else{if let requested{managerOnly=requested};show()};return false}
     private func nativeMenuVisible()->Bool {
