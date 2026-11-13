@@ -91,7 +91,7 @@ def dmg(output, python, identity, notary):
         (resources/'CLAUDE-HTTP-NOTICE.txt').write_text('Dependencies and their licenses are in python/.\n',encoding='utf-8')
         sign(app,identity)
         (volume/'Applications').symlink_to('/Applications')
-        (volume/'先读我 - 安装说明.txt').write_text(
+        (volume/'README.txt').write_text(
             f'Token Monitor {release} · macOS 独立版'+('' if notary else '预览')+'\n\n'
             f'此镜像适用于：{chip}，macOS 13 或更新版本。\n'
             '不知道机型？苹果菜单  → 关于本机，查看「芯片」或「处理器」。\n\n'
@@ -99,7 +99,7 @@ def dmg(output, python, identity, notary):
             '2. 退出镜像，在「应用程序」打开 Token Monitor。菜单栏会出现星星。\n'
             '3. 左键看用量，右键管理模块、登录启动和通知。\n\n'
             '已经装过 SwiftBar 插件？设置和 Key 仍在本机，可先停用该插件，再打开独立版。\n'
-            '想继续用 SwiftBar？请下载发布页里的「Mac · SwiftBar 插件」，不用安装此镜像。\n\n'
+            '想继续用 SwiftBar？请下载发布页里的 Mac · SwiftBar plugin，不用安装此镜像。\n\n'
             + ('此包由 Developer ID 签名并提交 Apple 公证。\n' if notary else
                '此预览未做 Apple 公证。若首次打开被拦，确认镜像下载自项目的 GitHub 发布页后，'
                '到「系统设置 → 隐私与安全性 → 仍要打开」。公司管理的 Mac 可能不允许放行。\n'),
@@ -118,7 +118,7 @@ def dmg(output, python, identity, notary):
             installed=root/'installed'/'Token Monitor.app';installed.parent.mkdir()
             subprocess.run(['ditto',str(mount/'Token Monitor.app'),str(installed)],check=True)
             subprocess.run(['codesign','--verify','--deep','--strict',str(installed)],check=True)
-            if not (mount/'先读我 - 安装说明.txt').is_file() or os.readlink(mount/'Applications')!='/Applications':
+            if not (mount/'README.txt').is_file() or os.readlink(mount/'Applications')!='/Applications':
                 raise RuntimeError('Disk image is missing the installation guide or Applications shortcut')
             smoke(installed,root)
         finally:

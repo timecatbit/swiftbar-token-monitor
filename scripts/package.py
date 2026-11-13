@@ -27,16 +27,16 @@ def version():
 
 
 def downloads(number):
-    """What a release offers, in the order GitHub lists it (by file name): file, the label the page shows
-    instead of the name, and one line on who it is for. In-app updates look these names up, and the
+    """What a release offers, in the order GitHub lists it (by file name): file, the English label the page
+    shows instead of the name, and one line on who it is for. In-app updates look these names up, and the
     SwiftBar plugin keeps the short name every installed copy still fetches."""
     name = 'token-monitor-' + number
     return [
-        (name + '-macos-apple-silicon.dmg', 'Mac · Apple 芯片（M 系列）', '独立版预览，拖进「应用程序」即可，自带运行环境'),
-        (name + '-macos-intel.dmg', 'Mac · Intel 芯片', '独立版预览，拖进「应用程序」即可，自带运行环境'),
-        (name + '-windows-x64-setup.exe', 'Windows · 安装程序（推荐）', 'Windows 10/11，双击安装，不需要管理员权限'),
-        (name + '-windows-x64.zip', 'Windows · 免安装版', '完整解压后运行文件夹里的 Token Monitor.exe'),
-        (name + '.zip', 'Mac · SwiftBar 插件', '已经在用 SwiftBar 时选，不分芯片'),
+        (name + '-macos-apple-silicon.dmg', 'Mac · Apple Silicon', 'Apple 芯片（M 系列）的 Mac，独立版预览，拖进「应用程序」即可'),
+        (name + '-macos-intel.dmg', 'Mac · Intel', 'Intel 处理器的 Mac，独立版预览，拖进「应用程序」即可'),
+        (name + '-windows-x64-setup.exe', 'Windows · Installer', 'Windows 10/11 推荐，双击安装，不需要管理员权限'),
+        (name + '-windows-x64.zip', 'Windows · Portable', 'Windows 免安装版，完整解压后运行文件夹里的 Token Monitor.exe'),
+        (name + '.zip', 'Mac · SwiftBar plugin', '已经在用 SwiftBar 的 Mac，不分芯片'),
     ]
 
 
@@ -46,10 +46,11 @@ def release_notes(number):
     if not changes:
         raise SystemExit('CHANGELOG.md has no section for ' + number)
     base = '%s/releases/download/v%s/' % (REPOSITORY, number)
-    rows = ''.join('| %s | [下载](%s) | %s |\n' % (label, base + file, note) for file, label, note in downloads(number))
+    # The link reads as the asset list below does, so each row points at a name the reader can find there.
+    rows = ''.join('| [%s](%s) | %s |\n' % (label, base + file, note) for file, label, note in downloads(number))
     guide = ('## 该下载哪个？\n\n'
-             '| 你的电脑 | 安装包 | 说明 |\n| --- | --- | --- |\n' + rows + '\n'
-             '**Mac 选哪个芯片**：点屏幕左上角的苹果菜单 → 关于本机，显示「芯片：Apple M…」选 Apple 芯片，显示「处理器：Intel…」选 Intel。只下载一个。\n\n'
+             '| 下载 | 适合 |\n| --- | --- |\n' + rows + '\n'
+             '**Mac 选哪个芯片**：点屏幕左上角的苹果菜单 → 关于本机，显示「芯片：Apple M…」选 Apple Silicon，显示「处理器：Intel…」选 Intel。只下载一个。\n\n'
              '**SwiftBar 插件**：解压后进入目录运行 `python3 install.py`。已经装了插件的，在面板「Harness 更新」下点'
              '「更新到 %s」即可。\n\n'
              '**Mac 独立版预览未做 Apple 公证**。首次打开被拦时，确认文件来自本发布页，再到「系统设置 → 隐私与安全性 → 仍要打开」。'

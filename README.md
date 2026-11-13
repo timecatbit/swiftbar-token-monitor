@@ -17,17 +17,17 @@ macOS 菜单栏与 Windows 托盘应用：在一个面板里查看各 AI 编程�
 
 ## 下载与安装
 
-从 [最新发布页](https://github.com/timecatbit/swiftbar-token-monitor/releases/latest) 下载一个文件即可。发布页附件列表显示的是下表第二列的名字，下载后的文件名在第三列。
+从 [最新发布页](https://github.com/timecatbit/swiftbar-token-monitor/releases/latest) 下载一个文件即可。发布页附件列表显示的是下表第二列的名字，下载后的文件名在第三列（X.Y.Z 是版本号）。
 
 | 你的电脑 | 发布页上的名字 | 文件名 |
 | --- | --- | --- |
-| Mac，Apple M 系列芯片 | **Mac · Apple 芯片（M 系列）** | `token-monitor-版本-macos-apple-silicon.dmg` |
-| Mac，Intel 处理器 | **Mac · Intel 芯片** | `token-monitor-版本-macos-intel.dmg` |
-| Windows 10/11 | **Windows · 安装程序（推荐）** | `token-monitor-版本-windows-x64-setup.exe` |
-| Windows 10/11，不想安装 | **Windows · 免安装版** | `token-monitor-版本-windows-x64.zip` |
-| Mac，已经在用 SwiftBar | **Mac · SwiftBar 插件** | `token-monitor-版本.zip`，不分芯片 |
+| Mac，Apple M 系列芯片 | **Mac · Apple Silicon** | `token-monitor-X.Y.Z-macos-apple-silicon.dmg` |
+| Mac，Intel 处理器 | **Mac · Intel** | `token-monitor-X.Y.Z-macos-intel.dmg` |
+| Windows 10/11（推荐） | **Windows · Installer** | `token-monitor-X.Y.Z-windows-x64-setup.exe` |
+| Windows 10/11，不想安装 | **Windows · Portable** | `token-monitor-X.Y.Z-windows-x64.zip` |
+| Mac，已经在用 SwiftBar | **Mac · SwiftBar plugin** | `token-monitor-X.Y.Z.zip`，不分芯片 |
 
-不确定 Mac 芯片？点屏幕左上角的苹果菜单 → **关于本机**：显示「芯片：Apple M…」选 Apple 芯片，显示「处理器：Intel…」选 Intel。每个文件旁的 `sha256:` 是 GitHub 给出的校验值，需要时可以和下载的文件比对。Windows 的安装和使用见 [Windows 说明](windows/README.md)。
+不确定 Mac 芯片？点屏幕左上角的苹果菜单 → **关于本机**：显示「芯片：Apple M…」选 Apple Silicon，显示「处理器：Intel…」选 Intel。每个文件旁的 `sha256:` 是 GitHub 给出的校验值，需要时可以和下载的文件比对。Windows 的安装和使用见 [Windows 说明](windows/README.md)。
 
 ### Mac：独立版预览还是 SwiftBar 插件？
 
@@ -39,9 +39,9 @@ macOS 菜单栏与 Windows 托盘应用：在一个面板里查看各 AI 编程�
 | 取舍 | 预览未公证，首次可能要手动放行；新版需下载 DMG 替换应用 | 需先装 SwiftBar 和 Python 3.9+；安装时要在终端运行一次脚本 |
 | 适合 | 想试用不依赖 SwiftBar 的独立应用 | 已经在用 SwiftBar，并希望保留现有插件管理方式 |
 
-**独立版**：打开 DMG，把 **Token Monitor** 拖到 **应用程序**，推出镜像，再从应用程序打开。**预览未做 Apple 公证**。若首次打开被拦，确认下载自项目发布页后，到「系统设置 → 隐私与安全性 → 仍要打开」。受公司管理的 Mac 可能无法放行。两版共用本机设置和 Key；从插件切换到独立版时，先在 SwiftBar 停用本插件，避免两个星星和重复提醒。见 [Mac 安装说明](macos/安装说明.md)。
+**独立版**：打开 DMG，把 **Token Monitor** 拖到 **应用程序**，推出镜像，再从应用程序打开。**预览未做 Apple 公证**。若首次打开被拦，确认下载自项目发布页后，到「系统设置 → 隐私与安全性 → 仍要打开」。受公司管理的 Mac 可能无法放行。两版共用本机设置和 Key；从插件切换到独立版时，先在 SwiftBar 停用本插件，避免两个星星和重复提醒。见 [Mac 安装说明](macos/README.md)。
 
-**插件版**：先安装 [SwiftBar](https://github.com/swiftbar/SwiftBar/releases/latest)（也可用 `brew install --cask swiftbar`），首次打开时选定插件目录。再下载并解压发布页上的「Mac · SwiftBar 插件」，进入解压后的目录运行：
+**插件版**：先安装 [SwiftBar](https://github.com/swiftbar/SwiftBar/releases/latest)（也可用 `brew install --cask swiftbar`），首次打开时选定插件目录。再下载并解压发布页上的 **Mac · SwiftBar plugin**，进入解压后的目录运行：
 
 ```sh
 python3 install.py
