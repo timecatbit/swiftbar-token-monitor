@@ -1,10 +1,23 @@
 name: Windows tray
 
+# Releases need this build, and main takes direct pushes, so it runs on every push that can break it
+# rather than first surfacing at a tag.
 on:
+  push:
+    branches: [main]
+    paths:
+      - "windows/**"
+      - "lib/**"
+      - "assets/**"
+      - "token-monitor.30s.sh"
+      - "tests/test_windows.py"
+      - ".github/workflows/windows.yml"
   pull_request:
     paths:
       - "windows/**"
       - "lib/**"
+      - "assets/**"
+      - "token-monitor.30s.sh"
       - "tests/test_windows.py"
       - ".github/workflows/windows.yml"
   workflow_dispatch:
