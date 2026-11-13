@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Syntax checks, an unused-code scan and isolated unit tests; does not run the live plugin."""
+"""Syntax checks, an unused-code scan (lib, scripts and the Windows app) and isolated unit tests;
+does not run the live plugin."""
 import ast
 import os
 import hashlib
@@ -13,7 +14,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def unused_code():
     """No linter dependency: top-level functions, classes and imports nothing refers to."""
-    files = sorted(ROOT.glob('lib/*.py')) + sorted(ROOT.glob('scripts/*.py'))
+    # The Windows app is scanned too: without PySide6 its panel and host never load in the tests here,
+    # so parsing them is what catches a syntax error before the Windows build does.
+    files = sorted(ROOT.glob('lib/*.py')) + sorted(ROOT.glob('scripts/*.py')) + sorted(ROOT.glob('windows/*.py'))
     trees = {path: ast.parse(path.read_text(), str(path)) for path in files}
     used = {'main'}
     for tree in trees.values():
