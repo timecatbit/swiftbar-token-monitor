@@ -1,5 +1,9 @@
 # 更新记录
 
+## 5.18.1
+
+- 修复 Windows 版一打开就报错“QLockFile.tryLock() takes exactly one argument”、无法启动的问题。
+
 ## 5.18.0
 
 - 新增 Windows 版（预览）：独立的任务栏托盘应用，不需要 SwiftBar；下载 Release 里带 windows-x64 的 ZIP，完整解压后打开 Token Monitor.exe。
