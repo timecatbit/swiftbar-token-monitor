@@ -119,6 +119,24 @@ class WindowsUiTests(unittest.TestCase):
         self.app.processEvents()
         self.assertEqual(received,[['refresh-monitor']])
 
+    def test_star_click_that_took_focus_does_not_reopen_the_panel(self):
+        from types import SimpleNamespace
+        from PySide6.QtCore import QPoint
+        from PySide6.QtWidgets import QSystemTrayIcon
+        from panel import TrayPanel
+        from token_monitor import Desktop
+        panel=TrayPanel();self.addCleanup(panel.close)
+        panel.snapshot={'preferences':{'visible':[]},'moduleOptions':[]}
+        panel.show_at(QPoint(800,780),manager=True)
+        with patch.object(TrayPanel,'isActiveWindow',return_value=False):panel.focus_changed()
+        self.assertFalse(panel.isVisible())
+        opened=[];desktop=SimpleNamespace(panel=panel,open_panel=lambda:opened.append(True))
+        Desktop.tray_action(desktop,QSystemTrayIcon.Trigger)
+        self.assertEqual(opened,[])
+        panel.dismissed-=1
+        Desktop.tray_action(desktop,QSystemTrayIcon.Trigger)
+        self.assertEqual(opened,[True])
+
     def test_self_test_reads_history_via_real_backend_and_can_render(self):
         with tempfile.TemporaryDirectory() as tmp:
             out=Path(tmp)/'preview.png'

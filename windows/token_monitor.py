@@ -89,7 +89,7 @@ class Desktop(QObject):
     def tray_action(self,reason):
         if reason==QSystemTrayIcon.Trigger:
             if self.panel.isVisible():self.panel.hide()
-            else:self.open_panel()
+            elif not self.panel.just_dismissed():self.open_panel()
 
     def open_panel(self,manager=False):
         geometry=self.tray.geometry()

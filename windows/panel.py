@@ -1,6 +1,7 @@
 """Windows tray flyout: a compact dashboard using the shared snapshot contract."""
 import base64
 import math
+import time
 from html import escape
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, Signal
@@ -209,6 +210,7 @@ class TrayPanel(QWidget):
         self.hover=QTimer(self,singleShot=True,interval=80)
         self.hover.timeout.connect(self.open_hover)
         self.hovered=None;self.interacting=0;self.menu_refs=[]
+        self.dismissed=float('-inf')
 
     def show_at(self,anchor,manager=False):
         self.anchor=anchor;self.manager=manager;self.render(self.snapshot,force=True)
@@ -222,7 +224,12 @@ class TrayPanel(QWidget):
 
     def focus_changed(self):
         if self.isVisible() and not self.interacting and not self.menu and not self.isActiveWindow() and not QApplication.activePopupWidget():
-            self.hide()
+            self.dismissed=time.monotonic();self.hide()
+
+    def just_dismissed(self):
+        # Pressing the tray star takes focus from the panel, which closes it before the click arrives;
+        # that same click must not open it again.
+        return time.monotonic()-self.dismissed<0.5
 
     def keyPressEvent(self,event):
         if event.key()==Qt.Key_Escape:self.hide()
