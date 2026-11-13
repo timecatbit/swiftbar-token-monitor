@@ -326,6 +326,13 @@ class Desktop(QObject):
         self.updating.discard(key);self.action(['check-app-updates'])
 
 
+def single_instance(state):
+    """The held per-user lock, or None while another copy runs."""
+    lock=QLockFile(str(state/'tray.lock'));lock.setStaleLockTime(0)
+    # PySide6 6.8 needs the timeout: Qt moved the default onto its chrono overload, which isn't bound.
+    return lock if lock.tryLock(0) else None
+
+
 def self_test(app,m,state,render_path=None):
     """Packaged smoke test with synthetic local history, no network, tray or account access."""
     import json
@@ -352,6 +359,17 @@ def self_test(app,m,state,render_path=None):
     assert view.isVisible() and view.scroll.widget().findChild(Trend)
     if render_path and not view.grab().save(render_path):raise OSError('could not write preview')
     view.hide()
+    # The same start-up the tray runs, short of the message loop.
+    lock=single_instance(state);assert lock is not None and single_instance(state) is None
+    desktop=Desktop(app,m,state);desktop.start(True)
+    deadline=time.monotonic()+20
+    while (desktop.running or desktop.pending) and time.monotonic()<deadline:
+        app.processEvents();time.sleep(0.02)
+    assert not desktop.running and desktop.panel.snapshot.get('dashboard')
+    desktop.tray_action(QSystemTrayIcon.Trigger);app.processEvents()
+    assert desktop.panel.isVisible()
+    if os.name=='nt':desktop.before_tray_menu();assert not desktop.panel.isVisible()
+    desktop.quit();lock.unlock()
     if sys.stdout is not None:print('Token Monitor smoke test OK',flush=True)
 
 
@@ -382,8 +400,8 @@ def main():
     if os.name!='nt':
         QMessageBox.warning(None,'Token Monitor','这是 Windows 托盘版。macOS 请使用 SwiftBar 版本。');return 2
     state=host.state_dir();state.mkdir(parents=True,exist_ok=True);host.prepare_environment(state)
-    lock=QLockFile(str(state/'tray.lock'));lock.setStaleLockTime(0)
-    if not lock.tryLock():
+    lock=single_instance(state)
+    if lock is None:
         if not options.background:QMessageBox.information(None,'Token Monitor','已在运行，请点任务栏右下角的星星。')
         return 0
     if not QSystemTrayIcon.isSystemTrayAvailable():

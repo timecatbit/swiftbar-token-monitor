@@ -157,6 +157,15 @@ class WindowsUiTests(unittest.TestCase):
         Desktop.tray_action(desktop,QSystemTrayIcon.Trigger)
         self.assertEqual(opened,[True])
 
+    def test_second_copy_finds_the_instance_lock_held(self):
+        from token_monitor import single_instance
+        with tempfile.TemporaryDirectory() as tmp:
+            held=single_instance(Path(tmp))
+            self.assertIsNotNone(held)
+            self.assertIsNone(single_instance(Path(tmp)))
+            held.unlock()
+            again=single_instance(Path(tmp));self.assertIsNotNone(again);again.unlock()
+
     def test_heatmap_shades_spacing_and_caption_follow_the_mac_panel(self):
         from panel import Heatmap,axis_tokens,heat_detail,heat_levels,heat_note
         h={'columns':24,'rowLabels':['今天'],'labels':['11月13日 Fri %02d:00'%i for i in range(24)],
