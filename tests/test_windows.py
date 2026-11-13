@@ -205,6 +205,33 @@ class WindowsUiTests(unittest.TestCase):
         self.assertEqual(estimate([card('magpie',unpriced=1)]),['已知 API 估算'])
         self.assertEqual(estimate([card('magpie'),card('claude',available=False)]),['已知 API 估算'])
 
+    def test_share_menu_copies_only_the_picture_and_shows_the_result_in_the_title_row(self):
+        from types import SimpleNamespace
+        from PySide6.QtCore import QPoint
+        from PySide6.QtGui import QImage
+        from panel import TrayPanel
+        from token_monitor import Desktop
+        panel=TrayPanel();self.addCleanup(panel.close)
+        panel.snapshot={'dashboard':{'providers':[],'dates':['11/13'],'rangeKey':'today'}}
+        panel.show_at(QPoint(800,780))
+        requested=[];panel.share.connect(requested.append)
+        panel.open_share(panel.share_button)
+        self.assertEqual([a.text() for a in panel.menu.actions()],['复制图片','保存图片…'])
+        panel.menu.actions()[0].trigger();self.app.processEvents()
+        self.assertEqual(requested,['copy'])
+        picture=QImage(6,4,QImage.Format_RGB32);picture.fill(0xff336699)
+        desktop=SimpleNamespace(panel=panel,app=self.app,share_image=lambda:picture)
+        Desktop.share(desktop,'copy')
+        copied=self.app.clipboard().mimeData()
+        self.assertTrue(copied.hasImage());self.assertFalse(copied.hasUrls())
+        self.assertEqual(self.app.clipboard().image().size(),picture.size())
+        self.assertEqual((panel.share_button.text(),panel.share_note.text()),('✓','已复制'))
+        # A data refresh rebuilds the header but keeps the result until its two seconds are up.
+        panel.render(dict(panel.snapshot),force=True)
+        self.assertEqual((panel.share_button.text(),panel.share_note.text()),('✓','已复制'))
+        panel.copied=(True,0);panel.show_copy_state()
+        self.assertEqual((panel.share_button.text(),panel.share_note.text()),('↗',''))
+
     def test_self_test_reads_history_via_real_backend_and_can_render(self):
         with tempfile.TemporaryDirectory() as tmp:
             out=Path(tmp)/'preview.png'

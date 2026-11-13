@@ -292,23 +292,31 @@ class Desktop(QObject):
         if self.tray.isVisible():
             self.tray.showMessage('Token Monitor'+(' · '+subtitle if subtitle else ''),body,self.tray.icon())
 
-    def share(self):
+    def share_image(self):
         # A separate view captures the full scrollable content, not the screen behind the panel.
-        if not self.panel.snapshot.get('dashboard'):return
+        if not self.panel.snapshot.get('dashboard'):return None
         clone=TrayPanel();clone.snapshot=self.panel.snapshot;clone.style(clone.snapshot.get('appearance','glass'))
         content=clone.share_content()
         ratio=max(1,self.panel.devicePixelRatio())
         pic=QImage(round(content.width()*ratio),round(content.height()*ratio),QImage.Format_RGB32)
         pic.setDevicePixelRatio(ratio);pic.fill(content.palette().color(QPalette.Window))
-        content.render(pic)
+        content.render(pic);clone.deleteLater()
+        return pic
+
+    def share(self,mode='save'):
+        pic=self.share_image()
+        if pic is None:return
+        if mode=='copy':
+            # Only the image goes on the clipboard, no file path, so it pastes straight into a chat.
+            clipboard=self.app.clipboard();clipboard.setImage(pic)
+            self.panel.copied_result(clipboard.mimeData().hasImage());return
         self.panel.interacting+=1
-        try:path,_=QFileDialog.getSaveFileName(self.panel,'分享用量图','Token Monitor.png','PNG 图片 (*.png)')
+        try:path,_=QFileDialog.getSaveFileName(self.panel,'保存用量图','Token Monitor.png','PNG 图片 (*.png)')
         finally:self.panel.interacting-=1
         self.panel.flush_pending()
         if path:
             if not path.lower().endswith('.png'):path+='.png'
             if not pic.save(path):self.error('保存失败','请选择可写入的文件夹。')
-        clone.deleteLater()
 
     def update_cli(self,binary,key):
         if key in self.updating:
@@ -366,6 +374,7 @@ def self_test(app,m,state,render_path=None):
     while (desktop.running or desktop.pending) and time.monotonic()<deadline:
         app.processEvents();time.sleep(0.02)
     assert not desktop.running and desktop.panel.snapshot.get('dashboard')
+    assert not desktop.share_image().isNull()
     desktop.tray_action(QSystemTrayIcon.Trigger);app.processEvents()
     assert desktop.panel.isVisible()
     if os.name=='nt':desktop.before_tray_menu();assert not desktop.panel.isVisible()

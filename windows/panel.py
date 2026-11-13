@@ -9,6 +9,7 @@ from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (QColor, QFont, QFontMetrics, QIcon, QPainter, QPainterPath,
                            QPalette, QPen, QPixmap)
 from PySide6.QtSvg import QSvgRenderer
+from shiboken6 import isValid
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel,
                                QMenu, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
@@ -317,7 +318,7 @@ class TrayPanel(QWidget):
     action=Signal(list)
     link=Signal(str)
     shown=Signal(bool)
-    share=Signal()
+    share=Signal(str)
     def __init__(self):
         super().__init__(None,Qt.Tool|Qt.FramelessWindowHint|Qt.WindowStaysOnTopHint)
         self.setWindowTitle('Token Monitor');self.setFixedWidth(380)
@@ -333,6 +334,8 @@ class TrayPanel(QWidget):
         self.hover.timeout.connect(self.open_hover)
         self.hovered=None;self.interacting=0;self.menu_refs=[]
         self.dismissed=float('-inf')
+        # A copy result shows for two seconds, across rebuilds, like the Mac panel.
+        self.copied=None;self.share_button=None;self.share_note=None
 
     def show_at(self,anchor,manager=False):
         self.anchor=anchor;self.manager=manager;self.render(self.snapshot,force=True)
@@ -411,9 +414,12 @@ class TrayPanel(QWidget):
         if sharing:
             head.addWidget(label(d.get('rangeLabel',''),'muted'))
         else:
-            for glyph,hint,act in [('⌕','自动检测',lambda:self.action.emit(['detect-modules'])),
-                                   ('↗','分享用量图',self.share.emit),('⟳','刷新数据',lambda:self.action.emit(['refresh']))]:
-                head.addWidget(tool(glyph,hint,act))
+            self.share_note=label();head.addWidget(self.share_note)
+            share=tool('↗','分享用量图',lambda:self.open_share(share));self.share_button=share
+            for button in (tool('⌕','自动检测',lambda:self.action.emit(['detect-modules'])),share,
+                           tool('⟳','刷新数据',lambda:self.action.emit(['refresh']))):
+                head.addWidget(button)
+            self.show_copy_state()
             picker=QComboBox();picker.setAccessibleName('统计范围')
             for entry in snapshot.get('rangeOptions',[]):
                 picker.addItem(entry['label'],entry['action'][1])
@@ -535,6 +541,29 @@ class TrayPanel(QWidget):
         if x+hint.width()>geo.right():x=self.geometry().left()-hint.width()
         menu.popup(QPoint(max(geo.left(),x),max(geo.top(),min(pos.y(),geo.bottom()-hint.height()+1))))
         if entry.get('onOpenAction'):self.action.emit(entry['onOpenAction'])
+
+    def open_share(self,button):
+        self.cancel_hover()
+        if self.menu:return
+        menu=QMenu(self);self.menu=menu
+        for text,mode in (('复制图片','copy'),('保存图片…','save')):
+            menu.addAction(text,lambda mode=mode:QTimer.singleShot(0,lambda:self.share.emit(mode)))
+        menu.aboutToHide.connect(lambda:self.menu_closed(menu))
+        menu.popup(button.mapToGlobal(QPoint(0,button.height())))
+
+    def copied_result(self,ok):
+        self.copied=(ok,time.monotonic()+2);self.show_copy_state()
+        QTimer.singleShot(2050,self.show_copy_state)
+
+    def show_copy_state(self):
+        if self.copied and time.monotonic()>=self.copied[1]:self.copied=None
+        button,note=self.share_button,self.share_note
+        if not (button and note and isValid(button) and isValid(note)):return
+        ok=None if self.copied is None else self.copied[0]
+        color='' if ok is None else '#2b9263' if ok else '#cc781d'
+        button.setText('↗' if ok is None else '✓' if ok else '!')
+        note.setText('' if ok is None else '已复制' if ok else '复制失败')
+        for widget in (button,note):widget.setStyleSheet('color:'+color+';' if color else '')
 
     def populate_menu(self,menu,entries):
         for e in entries:
