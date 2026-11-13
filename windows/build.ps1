@@ -49,10 +49,13 @@ Get-ChildItem -LiteralPath $Site -Directory -Filter "*.dist-info" | ForEach-Obje
     }
 }
 $env:QT_QPA_PLATFORM = "offscreen"
+# Offscreen Qt reads fonts from a folder rather than asking Windows, and the bundle ships none, so the
+# smoke picture showed every character as a box. Point it at the system fonts.
+$env:QT_QPA_FONTDIR = Join-Path $env:WINDIR "Fonts"
 $Preview = Join-Path $Build "smoke.png"
 Remove-Item -LiteralPath $Preview -ErrorAction SilentlyContinue
 $Process = Start-Process -FilePath (Join-Path $App "Token Monitor.exe") -ArgumentList @("--self-test", "--preview", ('"' + $Preview + '"')) -Wait -PassThru
-Remove-Item Env:QT_QPA_PLATFORM
+Remove-Item Env:QT_QPA_PLATFORM, Env:QT_QPA_FONTDIR
 if ($Process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $Preview)) { throw "Packaged Windows smoke test failed." }
 $Archive = Join-Path $Dist "$Name.zip"
 Compress-Archive -LiteralPath $App -DestinationPath $Archive -Force
