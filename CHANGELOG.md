@@ -1,5 +1,14 @@
 # 更新记录
 
+## 5.20.1
+
+- 发布页只留 5 个下载，按系统和芯片用英文标明（Mac · Apple Silicon、Mac · Intel、Windows · Installer、Windows · Portable、Mac · SwiftBar plugin），上方表格写明各自适合谁。
+- 不再附带 .sha256 文件：GitHub 在每个文件旁显示 sha256 校验值，自动更新也直接用它校验。
+- Mac 独立版的安装包改名为 token-monitor-X.Y.Z-macos-apple-silicon.dmg 和 -macos-intel.dmg。
+- Mac 独立版首次启动时请求一次通知权限，用量和余额提醒默认就能弹出；授权后右键星星的“通知设置…”打开系统设置。
+- 修复 Mac 独立版“关于”对话框打开后很快失去焦点。
+- 发布页说明里的粗体不再显示成星号。
+
 ## 5.20.0
 
 - 新增 macOS 独立版预览：Apple 芯片和 Intel 分开下载，拖入「应用程序」即可安装，自带 Python，无需 SwiftBar。此预览未做 Apple 公证。
