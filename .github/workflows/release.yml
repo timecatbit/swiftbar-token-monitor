@@ -1,6 +1,4 @@
-# Builds the universal panel once and packages token-monitor-<version>.zip, so users install without
-# git or Xcode Command Line Tools. Pushing a v<version> tag publishes a GitHub release with the zip;
-# a manual run only uploads the package as a workflow artifact for testing.
+# The release is published only after the SwiftBar ZIP, both Mac DMGs and the Windows installer pass.
 name: Release
 
 on:
@@ -64,9 +62,16 @@ jobs:
     permissions:
       contents: read
 
+  macos-dmg:
+    uses: ./.github/workflows/macos-dmg.yml
+    with:
+      expected-tag: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+    permissions:
+      contents: read
+
   publish:
     if: github.event_name == 'push'
-    needs: [package, windows]
+    needs: [package, macos-dmg, windows]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -79,13 +84,26 @@ jobs:
         with:
           name: token-monitor-windows-x64
           path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: token-monitor-macos-*
+          path: dist
+          merge-multiple: true
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           version="${GITHUB_REF_NAME#v}"
-          gh release create "$GITHUB_REF_NAME" --verify-tag --title "token-monitor $version" \
+          # Existing in-app updates still fetch the legacy basename. The labelled
+          # copy gives first-time users an unambiguous choice in the assets list.
+          plugin="TokenMonitor-$version-macOS-SwiftBar-Plugin.zip"
+          cp "dist/token-monitor-$version.zip" "dist/$plugin"
+          (cd dist && sha256sum "$plugin" > "$plugin.sha256")
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "Token Monitor $version · Mac / Windows" \
             --notes-file dist/release-notes.md \
-            "dist/token-monitor-$version.zip" "dist/token-monitor-$version.zip.sha256" \
-            "dist/token-monitor-$version-windows-x64.zip" "dist/token-monitor-$version-windows-x64.zip.sha256" \
-            "dist/token-monitor-$version-windows-x64-setup.exe" "dist/token-monitor-$version-windows-x64-setup.exe.sha256"
+            "dist/TokenMonitor-$version-macOS-AppleSilicon-arm64.dmg#macOS · Apple 芯片独立版预览（未公证）" "dist/TokenMonitor-$version-macOS-AppleSilicon-arm64.dmg.sha256" \
+            "dist/TokenMonitor-$version-macOS-Intel-x64.dmg#macOS · Intel 独立版预览（未公证）" "dist/TokenMonitor-$version-macOS-Intel-x64.dmg.sha256" \
+            "dist/$plugin#macOS · SwiftBar 插件（Apple 芯片／Intel 通用）" "dist/$plugin.sha256" \
+            "dist/token-monitor-$version.zip#兼容文件 · SwiftBar 旧版自动更新用" "dist/token-monitor-$version.zip.sha256#兼容校验 · SwiftBar 旧版自动更新用" \
+            "dist/token-monitor-$version-windows-x64.zip#Windows x64 · 免安装版（解压运行）" "dist/token-monitor-$version-windows-x64.zip.sha256" \
+            "dist/token-monitor-$version-windows-x64-setup.exe#Windows x64 · 安装程序（推荐）" "dist/token-monitor-$version-windows-x64-setup.exe.sha256"

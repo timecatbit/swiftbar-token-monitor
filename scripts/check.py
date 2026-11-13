@@ -16,7 +16,7 @@ def unused_code():
     """No linter dependency: top-level functions, classes and imports nothing refers to."""
     # The Windows app is scanned too: without PySide6 its panel and host never load in the tests here,
     # so parsing them is what catches a syntax error before the Windows build does.
-    files = sorted(ROOT.glob('lib/*.py')) + sorted(ROOT.glob('scripts/*.py')) + sorted(ROOT.glob('windows/*.py'))
+    files = sorted(ROOT.glob('lib/*.py')) + sorted(ROOT.glob('scripts/*.py')) + sorted(ROOT.glob('windows/*.py')) + sorted(ROOT.glob('macos/*.py'))
     trees = {path: ast.parse(path.read_text(), str(path)) for path in files}
     used = {'main'}
     for tree in trees.values():

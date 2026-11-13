@@ -89,6 +89,6 @@ def update_command(binary,key,state_dir,refresh_url):
         "  printf '\\n更新成功：%s → %s\\n' \"$token_before\" \"$token_after\"",
         'fi | /usr/bin/tee -a "$token_update_log"',
         "printf '\\n日志已保存：%s\\n\\n' \"$token_update_log\" | /usr/bin/tee -a \"$token_update_log\"",
-        shlex.join(['/usr/bin/open','-g',refresh_url]),
+        shlex.join(['/usr/bin/open','-g',refresh_url]) if refresh_url else ':',
         '(exit "$token_update_status")',
     ])

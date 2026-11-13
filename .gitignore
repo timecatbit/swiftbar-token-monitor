@@ -17,3 +17,4 @@ __pycache__/
 *token.local*
 **/config.local.json
 .venv/
+*.dmg

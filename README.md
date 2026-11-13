@@ -1,6 +1,6 @@
 # Token Monitor
 
-SwiftBar 菜单栏插件：在一个原生面板里查看各 AI 编程工具的 Token 用量和 API 等值费用，以及订阅额度、API 余额和客户端更新。
+macOS 菜单栏与 Windows 托盘应用：在一个面板里查看各 AI 编程工具的 Token 用量和 API 等值费用，以及订阅额度、API 余额和客户端更新。
 
 <p align="center">
   <img src="preview.png" width="360" alt="Token Monitor 主页：Summary、各工具用量、订阅、API 余额与更新提醒">
@@ -15,61 +15,55 @@ SwiftBar 菜单栏插件：在一个原生面板里查看各 AI 编程工具的 
 - **Harness 更新**：已勾选客户端有新版本时提醒，Claude Code 和 Codex CLI 可一键在终端更新。
 - **其他**：Komari 服务器监控；分享按钮把当前用量生成一张图，可直接复制或发送。
 
-## 安装
+## 下载与安装
 
-- **Windows**：独立的任务栏托盘应用，无需 SwiftBar。见 [Windows 使用和构建说明](windows/README.md)。
-- **macOS**：继续使用下方的 SwiftBar 安装方式。
+从 [最新发布页](https://github.com/timecatbit/swiftbar-token-monitor/releases/latest) 选一个适合你的安装包。只需下载一项；`.sha256` 是可选的校验文件。
 
-需要 macOS 13+ 和 Python 3.9+。
+| 你的电脑 | 下载哪个 |
+| --- | --- |
+| Mac，Apple M 系列芯片 | **独立版预览：`TokenMonitor-版本-macOS-AppleSilicon-arm64.dmg`** |
+| Mac，Intel 处理器 | **独立版预览：`TokenMonitor-版本-macOS-Intel-x64.dmg`** |
+| Mac，已经在用 SwiftBar、想继续用插件 | **`TokenMonitor-版本-macOS-SwiftBar-Plugin.zip`**，不分芯片。旧版叫 `token-monitor-版本.zip` |
+| Windows 10/11 x64 | **`token-monitor-版本-windows-x64-setup.exe`**；不想安装才选 `windows-x64.zip`。见 [Windows 安装说明](windows/README.md) |
 
-**第一步：安装 SwiftBar。** Token Monitor 是 SwiftBar 插件，先装好 SwiftBar：
+不确定 Mac 芯片？点击 ** → 关于本机**。显示「芯片：Apple M…」选 Apple Silicon，显示「处理器：Intel…」选 Intel。若你打开的是较早的发布页、没有 DMG，请使用 SwiftBar 插件 ZIP；发布页会明确列出该版本实际提供的包。
 
-```sh
-brew install --cask swiftbar
-```
+### Mac：独立版预览还是 SwiftBar 插件？
 
-没有 Homebrew 的话，从 [SwiftBar Releases](https://github.com/swiftbar/SwiftBar/releases/latest) 下载安装。第一次打开 SwiftBar 时，它会让你选一个插件目录（比如新建 `~/SwiftBar`），选好即可。
+两版使用同一个原生 macOS 面板和用量后端，支持 macOS 13 及以上。趋势图、热力图、范围筛选和历史统计的口径相同。
 
-**第二步：安装 Token Monitor。** 在终端运行（版本号换成 [Releases](https://github.com/timecatbit/swiftbar-token-monitor/releases/latest) 上最新的）：
+| | 独立版 DMG | SwiftBar 插件版 |
+| --- | --- | --- |
+| 优点 | 拖进「应用程序」即可安装；自带 Python；可在星星右键设置登录启动 | 适合已经用 SwiftBar 管理多个插件的人；包更小；可在面板内更新插件 |
+| 取舍 | 预览未公证，首次可能要手动放行；新版需下载 DMG 替换应用 | 需先装 SwiftBar 和 Python 3.9+；安装时要在终端运行一次脚本 |
+| 适合 | 想试用不依赖 SwiftBar 的独立应用 | 已经在用 SwiftBar，并希望保留现有插件管理方式 |
 
-```sh
-cd ~/Downloads
-curl -fLO https://github.com/timecatbit/swiftbar-token-monitor/releases/download/v5.16.1/token-monitor-5.16.1.zip
-ditto -x -k token-monitor-5.16.1.zip .
-python3 token-monitor-5.16.1/install.py
-```
+**独立版：**打开 DMG，把 **Token Monitor** 拖到 **应用程序**，推出镜像，再从应用程序打开。**预览未做 Apple 公证。** 若首次打开被拦，确认下载自项目发布页并核对 SHA-256 后，到「系统设置 → 隐私与安全性 → 仍要打开」。受公司管理的 Mac 可能无法放行。两版共用本机设置和 Key；从插件切换到独立版时，先在 SwiftBar 停用本插件，避免两个星星和重复提醒。见 [Mac 安装说明](macos/安装说明.md)。
 
-安装器会自动找到 SwiftBar 的插件目录，备份旧文件、保留你的设置，首次安装还会自动勾选检测到的工具。装好后菜单栏会出现星星图标，发布包可以删除。
-
-如果是用浏览器下载、双击解压的，第一次打开面板时 macOS 可能提示无法验证开发者：到“系统设置 → 隐私与安全性”点一次“仍要打开”即可。
-
-<details>
-<summary>从源码安装</summary>
-
-需要 git 和 Xcode 命令行工具（`xcode-select --install`）：
+**插件版：**先安装 [SwiftBar](https://github.com/swiftbar/SwiftBar/releases/latest)（也可用 `brew install --cask swiftbar`），首次打开时选定插件目录。再下载并解压发布页标为「SwiftBar 插件」的 ZIP，进入解压后的目录运行：
 
 ```sh
-git clone https://github.com/timecatbit/swiftbar-token-monitor.git
-cd swiftbar-token-monitor
-python3 scripts/install.py
+python3 install.py
 ```
-</details>
+
+安装器会找到 SwiftBar 插件目录，保留已有设置和备份；装好后菜单栏出现星星，下载包可以删除。需要从源码安装时，在仓库根目录运行 `python3 scripts/install.py`（需 Xcode 命令行工具）。
 
 ## 更新
 
-- **插件**：有新版本时，主页“Harness 更新”下方会出现一行 **Token Monitor · 可更新**。点“更新到 X.Y.Z”，确认后插件自动下载、校验并安装，设置、Key 和统计记录都会保留。没有新版本时这一行不显示。
+- **SwiftBar 插件**：有新版本时，主页“Harness 更新”下方会出现一行 **Token Monitor · 可更新**。点“更新到 X.Y.Z”，确认后插件自动下载、校验并安装，设置、Key 和统计记录都会保留。没有新版本时这一行不显示。
+- **Mac 独立版**：有适用当前芯片的新版本时，面板会链接到发布页。退出旧版，下载同芯片的新 DMG，再替换「应用程序」里的 App。
 - **价格表**：每天自动更新，新模型的价格不用等插件发版。
 
 ## 使用
 
-- **统计范围**默认显示当天。首次安装会在后台读取这台 Mac 已有的用量记录；选「全部」可以查看仍保存在本机的记录，不需要发起新调用。Claude 只统计桌面 App 已登记的会话，ChatGPT 包含本机 Codex 的活动和归档会话。已经删除、从未同步到本机或没有记录 Token 的对话无法补算。
+- **统计范围**默认显示当天。首次安装会在后台读取这台电脑已有的用量记录；选「全部」可以查看仍保存在本机的记录，不需要发起新调用。Claude 只统计桌面 App 已登记的会话，ChatGPT 包含本机 Codex 的活动和归档会话。已经删除、从未同步到本机或没有记录 Token 的对话无法补算。
 - **左键星星**打开主页。Summary 旁边依次是自动检测（放大镜图标）、分享和刷新按钮，鼠标停上去会显示名称；把鼠标停在一行上，会在旁边展开详情和操作。
 - **Magpie**：读取本机网关的 `usage.jsonl`（默认 `~/.config/magpie`，也支持 `XDG_CONFIG_HOME` 或手选目录），只统计网关最终有用量的请求，不读 Key，也不要求 Magpie 正在运行。同时勾选 Magpie 和经过它的 Harness（如 ChatGPT、Claude）时，经过 Magpie 的请求只按 Magpie 计入 Summary，Harness 卡片照常显示自己的记录并注明“N 次已由 Magpie 计入”；没经过 Magpie 的请求仍由 Harness 计入。OpenCodex 同理。Magpie 卡片还会写出各客户端的占比（如“客户端 · ChatGPT 62% · Claude Code 30%”）；只想看网关总账时，主页只勾 Magpie 即可。费用是按已知价格的估算。
 - **DeepSeek Harness**：默认读取 `~/.dsh/sessions`。如果设置了 `DSH_HOME`，读取其 `sessions` 子目录；也可手选记录目录。通过 Magpie 调用 DeepSeek 模型的用量在 Magpie 卡片中查看。
 - **用量热力图**在 Summary 下方，跟着统计范围变：今日和近 24 小时每格 1 小时，近 7 天和本周（从周一到今天）每行一天、每格 1 小时，近 30 天、本月和全部每格 1 天；颜色越深用得越多，右下角写着每格多久。鼠标停在某格时左下角显示那段时间的 Token、费用和请求数，分享图里也会带上。不需要时可在主页模块里关闭。
 - **右键星星 → 主页模块…** 选择要显示的模块，并设置记录目录、Key 和连接。
 - **自动检测**（主页按钮或右键星星）按本机已安装的工具重新勾选模块，会先列出将启用和取消的模块，确认前不会改动任何设置。
-- 不常用的设置写在 `~/Library/Application Support/SwiftBarToken/config.local.sh`，可用的变量见 [config.example.sh](config.example.sh)。如果命令行工具只在终端初始化时加入 PATH（例如通过 nvm 安装），可在这个文件里把对应的 `bin` 目录加进 PATH。
+- Mac 的高级设置写在 `~/Library/Application Support/SwiftBarToken/config.local.sh`，可用的变量见 [config.example.sh](config.example.sh)。如果命令行工具只在终端初始化时加入 PATH（例如通过 nvm 安装），可在这个文件里把对应的 `bin` 目录加进 PATH。
 
 ## 隐私
 
@@ -90,7 +84,7 @@ python3 scripts/package.py  # 打包发布 zip
 
 ## 致谢
 
-- [SwiftBar](https://github.com/swiftbar/SwiftBar)（MIT）：本插件运行在 SwiftBar 之上，菜单栏图标、右键菜单和定时刷新都由它提供。
+- [SwiftBar](https://github.com/swiftbar/SwiftBar)（MIT）：插件版由 SwiftBar 提供菜单栏图标、右键菜单和定时刷新。
 - [ccusage](https://github.com/ccusage/ccusage)（MIT）：用量统计规则与模型价格快照，许可见 [lib/CCUSAGE_LICENSE](lib/CCUSAGE_LICENSE)。
 - [CodexBar](https://github.com/steipete/CodexBar)（MIT）：Claude 用量查询的参考实现，许可见 [lib/CODEXBAR_LICENSE](lib/CODEXBAR_LICENSE)。
 - [LobeHub Icons](https://github.com/lobehub/lobe-icons)（MIT）：品牌图标，许可见 [assets/logos/LICENSE](assets/logos/LICENSE)；标志归各自所有者，仅用于标识服务。

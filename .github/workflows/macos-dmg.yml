@@ -1,0 +1,52 @@
+name: macOS standalone
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      expected-tag:
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  dmg:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            runtime: cpython-3.12.13-macos-aarch64-none
+            artifact: AppleSilicon-arm64
+          - runner: macos-26-intel
+            runtime: cpython-3.12.13-macos-x86_64-none
+            artifact: Intel-x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: false
+      - name: Prepare the relocatable runtime
+        env:
+          PYTHON_RUNTIME: ${{ matrix.runtime }}
+        run: |
+          uv python install --no-bin "$PYTHON_RUNTIME"
+          runtime=$(uv python find --managed-python "$PYTHON_RUNTIME")
+          echo "TOKEN_RUNTIME=$runtime" >> "$GITHUB_ENV"
+      - name: Build, validate and smoke test the disk image
+        env:
+          EXPECTED_TAG: ${{ inputs.expected-tag }}
+        run: python3 scripts/build_dmg.py --python "$TOKEN_RUNTIME" --tag "$EXPECTED_TAG"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: token-monitor-macos-${{ matrix.artifact }}
+          path: dist/*.dmg*
+          if-no-files-found: error

@@ -109,6 +109,20 @@ class UpdateTests(unittest.TestCase):
    download.assert_called_once_with(repo+'/releases/download/v99.0.0/'+windows+'.sha256',4096)
    self.assertTrue(any('可更新 99.0.0' in row for row in self.m.self_update_lines({'self_update':release})))
 
+ def test_mac_app_only_offers_its_own_architecture_and_preserves_swiftbar_basename(self):
+  release={'latest':'99.0.0','assets':[{'name':'token-monitor-99.0.0.zip'},
+                                      {'name':'TokenMonitor-99.0.0-macOS-Intel-x64.dmg'}]}
+  self.assertEqual(self.m.update_asset_name('99.0.0'),'token-monitor-99.0.0.zip')
+  with patch.object(self.m,'MAC_APP',True),patch.object(self.m.platform,'machine',return_value='arm64'):
+   self.assertEqual(self.m.self_update_lines({'self_update':release}),[])
+   release['assets'].append({'name':'TokenMonitor-99.0.0-macOS-AppleSilicon-arm64.dmg'})
+   lines='\n'.join(self.m.self_update_lines({'self_update':release}))
+   self.assertIn('可更新 99.0.0',lines)
+   self.assertIn('releases/tag/v99.0.0',lines)
+   self.assertNotIn('update-self',lines)
+  with patch.object(self.m,'MAC_APP',True),patch.object(self.m.platform,'machine',return_value='x86_64'):
+   self.assertEqual(self.m.update_asset_name('99.0.0'),'TokenMonitor-99.0.0-macOS-Intel-x64.dmg')
+
  def test_self_update_verifies_the_archive_and_runs_its_installer(self):
   import hashlib,io,zipfile
   root=Path(self.tmp.name);marker=root/'installed.json'

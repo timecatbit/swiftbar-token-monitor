@@ -1,6 +1,8 @@
 import AppKit
 import CoreGraphics
 import Darwin
+import ServiceManagement
+import UserNotifications
 
 struct Entry: Decodable {
     var label:String;var separator:Bool?;var image:String?;var template:Bool?;var symbol:String?
@@ -1519,6 +1521,77 @@ final class HoverIntent {
     func cancel(){task?.cancel();task=nil;target=nil}
 }
 
+// The standalone app uses the same snapshots and action receipts as the SwiftBar helper.
+final class MacHost {
+    private let worker:URL
+    private let refreshQueue=DispatchQueue(label:"token-monitor.refresh",qos:.utility)
+    private let actionQueue=DispatchQueue(label:"token-monitor.actions",qos:.userInitiated)
+    private var running=false
+    private var refreshAgain=false
+    var snapshotPath:String?
+    init?(bundle:Bundle) {
+        guard let url=bundle.url(forResource:"token-monitor-worker",withExtension:"sh") else{return nil}
+        worker=url
+    }
+    @discardableResult private func run(_ job:String, output:Pipe?=nil) -> Bool {
+        let process=Process();process.executableURL=worker;process.arguments=[job]
+        process.standardOutput=output as Any? ?? FileHandle.nullDevice
+        process.standardError=FileHandle.nullDevice
+        do{try process.run();process.waitUntilExit();return process.terminationStatus==0}catch{return false}
+    }
+    func prepare(_ ready:@escaping (String?)->Void) {
+        refreshQueue.async {
+            let output=Pipe()
+            guard self.run("paths",output:output),
+                  let data=try? output.fileHandleForReading.readToEnd(),
+                  let payload=(try? JSONSerialization.jsonObject(with:data)) as? [String:String],
+                  let path=payload["snapshot"] else{DispatchQueue.main.async{ready(nil)};return}
+            let ok=self.run("prepare")
+            DispatchQueue.main.async{self.snapshotPath=ok ? path : nil;ready(self.snapshotPath)}
+        }
+    }
+    func refresh() {
+        if running{refreshAgain=true;return}
+        running=true
+        refreshQueue.async {
+            self.run("refresh")
+            DispatchQueue.main.async {
+                self.running=false
+                if self.refreshAgain{self.refreshAgain=false;self.refresh()}
+            }
+        }
+    }
+    func action() {
+        actionQueue.async {
+            self.run("action")
+            DispatchQueue.main.async{self.refresh()}
+        }
+    }
+    func checkNotifications() {
+        UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
+            DispatchQueue.main.async {
+                guard let self,let path=self.snapshotPath else{return}
+                let enabled=settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
+                let url=URL(fileURLWithPath:path).deletingLastPathComponent().appendingPathComponent("notifications-enabled.json")
+                let data=Data((enabled ? "{\"schema\":1,\"allowed\":true}" : "{\"schema\":1,\"allowed\":false}").utf8)
+                if (try? Data(contentsOf:url)) != data{try? data.write(to:url,options:.atomic)}
+                self.deliverNotices()
+            }
+        }
+    }
+    func deliverNotices() {
+        guard let path=snapshotPath else{return}
+        let directory=URL(fileURLWithPath:path).deletingLastPathComponent()
+        for url in (try? FileManager.default.contentsOfDirectory(at:directory,includingPropertiesForKeys:nil)) ?? [] where url.lastPathComponent.hasPrefix("notice-") && url.pathExtension=="json" {
+            defer{try? FileManager.default.removeItem(at:url)}
+            guard let data=try? Data(contentsOf:url),let notice=(try? JSONSerialization.jsonObject(with:data)) as? [String:String],
+                  let body=notice["body"] else{continue}
+            let content=UNMutableNotificationContent();content.title="Token Monitor";content.subtitle=notice["subtitle"] ?? "";content.body=body
+            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier:UUID().uuidString,content:content,trigger:nil))
+        }
+    }
+}
+
 final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePickerDelegate {
     private let panel=Panel(contentRect:.zero,styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
     private var rangePicker:NSPopUpButton?;private var anchoredMenuOpen=false;private var toast:(text:String,until:Date,ok:Bool)?;private var toastView:NSView?;private weak var shareButton:NSButton?;private weak var detectButton:NSButton?;private var hintTask:DispatchWorkItem?;private var hintView:NSView?;private var userApp:NSRunningApplication?;private var firstActivation=true;private var managerOnly=false
@@ -1526,15 +1599,48 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
     private var anchor:NSPoint = .zero;private var anchorRect:NSRect = .zero;private var scrollOffset:CGFloat=0
     private var fallbackTimer:Timer?;private let observer=SnapshotObserver();private var actionTimeout:DispatchWorkItem?;private var reloadTask:DispatchWorkItem?;private var monitors:[Any]=[];private var pendingAction:String?
     private var interaction=PanelInteraction()
+    private var macHost:MacHost?
+    private var statusItem:NSStatusItem?
+    private var refreshTimer:Timer?
+    private var preparing=false
+    private var requestedHome:Bool?
     private var sourceChecks:[String:Date]=[:]
     private var flyouts:[Flyout]=[];private var rows:[[String:Row]]=[];private let hoverIntent=HoverIntent();private var closeTask:DispatchWorkItem?;private var closeLevel=0
     private var trail:[(point:NSPoint,time:TimeInterval)]=[]
     private func setup(_ window:Panel){window.backgroundColor = .clear;window.isOpaque=false;window.hasShadow=true;window.level = .popUpMenu;window.hidesOnDeactivate=false;window.isReleasedWhenClosed=false;window.acceptsMouseMovedEvents=true;window.collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary,.transient,.ignoresCycle];window.escape={[weak self] in self?.hide()}}
     func applicationDidFinishLaunching(_ notification:Notification){
         let args=CommandLine.arguments
-        guard let si=args.firstIndex(of:"--snapshot"),si+1<args.count,let pi=args.firstIndex(of:"--plugin"),pi+1<args.count else{NSApp.terminate(nil);return}
-        snapshotPath=args[si+1];pluginPath=args[pi+1];setup(panel);panel.setAccessibilityLabel("AI 用量面板")
-        observeSnapshot()
+        if Bundle.main.object(forInfoDictionaryKey:"TokenMonitorStandalone") as? Bool == true {
+            guard let host=MacHost(bundle:.main) else{NSApp.terminate(nil);return}
+            macHost=host
+            let item=NSStatusBar.system.statusItem(withLength:NSStatusItem.squareLength)
+            statusItem=item
+            if let button=item.button {
+                button.image=NSImage(systemSymbolName:"sparkles",accessibilityDescription:"Token Monitor")
+                button.image?.isTemplate=true
+                button.toolTip="Token Monitor"
+                button.target=self;button.action=#selector(starPressed(_:))
+                button.sendAction(on:[.leftMouseUp,.rightMouseUp])
+            }
+            preparing=true
+            requestedHome=args.contains("--show-panel") ? false : nil
+            host.prepare { [weak self, weak host] path in
+                guard let self,let host else{return};self.preparing=false
+                guard let path else {
+                    if self.requestedHome != nil{self.showActionFailure("无法初始化本机数据，请重新打开 Token Monitor。")}
+                    return
+                }
+                self.snapshotPath=path;self.observeSnapshot();host.checkNotifications();host.refresh()
+                self.refreshTimer=Timer.scheduledTimer(withTimeInterval:60,repeats:true){[weak host] _ in host?.refresh()}
+                self.refreshTimer?.tolerance=12
+                if let modules=self.requestedHome{self.requestedHome=nil;self.managerOnly=modules;self.show()}
+            }
+        }else {
+            guard let si=args.firstIndex(of:"--snapshot"),si+1<args.count,let pi=args.firstIndex(of:"--plugin"),pi+1<args.count else{NSApp.terminate(nil);return}
+            snapshotPath=args[si+1];pluginPath=args[pi+1]
+            observeSnapshot()
+        }
+        setup(panel);panel.setAccessibilityLabel("AI 用量面板")
         NSWorkspace.shared.notificationCenter.addObserver(self,selector:#selector(accessibilityChanged),name:NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,object:nil)
         if let front=NSWorkspace.shared.frontmostApplication,front != NSRunningApplication.current{userApp=front}
         NSWorkspace.shared.notificationCenter.addObserver(forName:NSWorkspace.didActivateApplicationNotification,object:nil,queue:.main){[weak self] note in
@@ -1542,12 +1648,59 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
         }
         NotificationCenter.default.addObserver(self,selector:#selector(rangeTrackingBegan(_:)),name:NSMenu.didBeginTrackingNotification,object:nil)
         NotificationCenter.default.addObserver(self,selector:#selector(rangeTrackingEnded(_:)),name:NSMenu.didEndTrackingNotification,object:nil)
-        show()
+        if macHost==nil{show()}
     }
+    @objc private func starPressed(_ button:NSStatusBarButton) {
+        let event=NSApp.currentEvent
+        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.option)==true || event?.modifierFlags.contains(.control)==true {
+            if panel.isVisible{hide(returningFocus:false)}
+            let menu=NSMenu()
+            func add(_ title:String,_ action:Selector)->NSMenuItem {
+                let item=NSMenuItem(title:title,action:action,keyEquivalent:"");item.target=self;menu.addItem(item);return item
+            }
+            _=add("主页模块…",#selector(openStandaloneModules))
+            _=add("自动检测…",#selector(standaloneDetect))
+            menu.addItem(.separator())
+            let login=add("登录时启动",#selector(toggleLogin));login.state=SMAppService.mainApp.status == .enabled ? .on : .off
+            _=add("开启系统通知…",#selector(allowNotices))
+            _=add("关于 Token Monitor",#selector(standaloneAbout))
+            menu.addItem(.separator())
+            _=add("退出 Token Monitor",#selector(quitStandalone))
+            menu.popUp(positioning:nil,at:NSPoint(x:0,y:button.bounds.minY),in:button)
+        }else if panel.isVisible{hide()}else{openStandalone(modules:false)}
+    }
+    private func openStandalone(modules:Bool) {
+        if snapshotPath.isEmpty {
+            if preparing{requestedHome=modules}else{showActionFailure("无法读取本机数据，请退出后重新打开 Token Monitor。")}
+            return
+        }
+        managerOnly=modules;macHost?.checkNotifications();show()
+    }
+    @objc private func openStandaloneModules(){openStandalone(modules:true)}
+    @objc private func standaloneDetect(){if !snapshotPath.isEmpty{performAction(["detect-modules"])}}
+    @objc private func toggleLogin(){
+        do{
+            if SMAppService.mainApp.status == .enabled {try SMAppService.mainApp.unregister()}
+            else{try SMAppService.mainApp.register()}
+        }catch{showActionFailure("请将 Token Monitor 拖到「应用程序」后重试，或检查系统设置中的登录项。")}
+    }
+    @objc private func allowNotices(){
+        UNUserNotificationCenter.current().requestAuthorization(options:[.alert,.sound]){[weak self] _,_ in
+            DispatchQueue.main.async{self?.macHost?.checkNotifications()}
+        }
+    }
+    @objc private func standaloneAbout(){
+        let version=Bundle.main.object(forInfoDictionaryKey:"CFBundleShortVersionString") as? String ?? ""
+        let alert=NSAlert();alert.messageText="Token Monitor "+version;alert.informativeText="macOS 独立版 · minicoke"
+        alert.addButton(withTitle:"好");alert.addButton(withTitle:"发布与更新")
+        activateForPanel()
+        if alert.runModal() == NSApplication.ModalResponse.alertSecondButtonReturn,let url=URL(string:"https://github.com/timecatbit/swiftbar-token-monitor/releases"){NSWorkspace.shared.open(url)}
+    }
+    @objc private func quitStandalone(){NSApp.terminate(nil)}
     private func observeSnapshot(){
         guard !observer.active else{return}
         observer.start(directory:URL(fileURLWithPath:snapshotPath).deletingLastPathComponent().path){[weak self] in
-            guard let self else{return};self.checkAction();self.updateFallback();if self.panel.isVisible{self.reload()}
+            guard let self else{return};self.macHost?.deliverNotices();self.checkAction();self.updateFallback();if self.panel.isVisible{self.reload()}
         }
         updateFallback()
     }
@@ -1582,7 +1735,7 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
             guard let self else{return};self.observeSnapshot();self.checkAction();if self.panel.isVisible{self.reload()}
         };fallbackTimer?.tolerance=0.25
     }
-    func applicationWillTerminate(_ notification:Notification){publishVisibility(false);observer.stop();removePointerMonitors();fallbackTimer?.invalidate()}
+    func applicationWillTerminate(_ notification:Notification){if !snapshotPath.isEmpty{publishVisibility(false)};observer.stop();removePointerMonitors();fallbackTimer?.invalidate();refreshTimer?.invalidate()}
     @objc private func accessibilityChanged(){if panel.isVisible{reload(force:true)}}
     private func showModuleMenu(_ event:NSEvent,in view:NSView){
         rangePicker?.menu?.cancelTracking();anchoredMenuOpen=false;hoverIntent.cancel();closeTask?.cancel();closeFlyouts(from:0)
@@ -1602,8 +1755,9 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
         if firstActivation{firstActivation=false;return}
         DispatchQueue.main.asyncAfter(deadline:.now()+0.6){[weak self] in guard let self,!self.panel.isVisible else{return};self.returnFocus()}
     }
-    func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{let requested=requestedMode();if panel.isVisible && (requested == nil || requested==managerOnly){hide()}else{if let requested{managerOnly=requested};show()};return false}
+    func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{if macHost != nil{openStandalone(modules:false);return false};let requested=requestedMode();if panel.isVisible && (requested == nil || requested==managerOnly){hide()}else{if let requested{managerOnly=requested};show()};return false}
     private func nativeMenuVisible()->Bool {
+        if macHost != nil{return false}
         let windows=CGWindowListCopyWindowInfo([.optionOnScreenOnly,.excludeDesktopElements],kCGNullWindowID) as? [[String:Any]] ?? []
         return windows.contains {row in
             guard row[kCGWindowOwnerName as String] as? String == "SwiftBar",
@@ -1612,7 +1766,22 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
             return (bounds["Width"] ?? 0)>80 && (bounds["Height"] ?? 0)>30
         }
     }
-    private func show(){if let requested=requestedMode(){managerOnly=requested};guard !nativeMenuVisible() else{hide();return};scrollOffset=0;anchor=NSEvent.mouseLocation;let screen=NSScreen.screens.first(where:{$0.frame.contains(anchor)}) ?? NSScreen.main!;anchorRect=NSRect(x:anchor.x-24,y:screen.visibleFrame.maxY,width:48,height:screen.frame.maxY-screen.visibleFrame.maxY+8);reload(force:true);panel.makeKeyAndOrderFront(nil);activateForPanel();observeSnapshot();installPointerMonitors();publishVisibility(true);if !managerOnly{performAction(["refresh-view"])}}
+    private func show(){
+        if macHost==nil,let requested=requestedMode(){managerOnly=requested}
+        guard !nativeMenuVisible() else{hide();return}
+        scrollOffset=0
+        if let button=statusItem?.button,let window=button.window {
+            anchorRect=window.convertToScreen(button.convert(button.bounds,to:nil))
+            anchor=NSPoint(x:anchorRect.midX,y:anchorRect.midY)
+        }else {
+            anchor=NSEvent.mouseLocation
+            let screen=NSScreen.screens.first(where:{$0.frame.contains(anchor)}) ?? NSScreen.main!
+            anchorRect=NSRect(x:anchor.x-24,y:screen.visibleFrame.maxY,width:48,height:screen.frame.maxY-screen.visibleFrame.maxY+8)
+        }
+        reload(force:true);panel.makeKeyAndOrderFront(nil);activateForPanel();observeSnapshot();installPointerMonitors();publishVisibility(true)
+        if let macHost{macHost.refresh()}else if !managerOnly{performAction(["refresh-view"])}
+    }
+
     // Glass and controls draw their inactive, greyer style until the app is active, so the panel used to
     // change colour on the first click. Opening the panel activates it; closing hands focus back.
     private func activateForPanel(){
@@ -1818,7 +1987,7 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
         let report=failed && !PanelInteraction.automatic(interaction.active ?? [])
         actionTimeout?.cancel();pendingAction=nil;interaction.finish(preferences);updateFallback()
         if panel.isVisible{reload(force:true)}
-        if report {showActionFailure("SwiftBar 未完成这次操作，请重试。")}
+        if report {showActionFailure(macHost==nil ? "SwiftBar 未完成这次操作，请重试。" : "未完成这次操作，请重试。")}
         if let next=interaction.next(){dispatchAction(next)}
     }
     private func showActionFailure(_ detail:String){
@@ -1971,12 +2140,12 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
             // The containing directory is private. A very fast SwiftBar can claim the request before chmod.
             try? FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:request.path)
             updateFallback()
-            wakeSwiftBar()
-            DispatchQueue.main.asyncAfter(deadline:.now()+0.8){[weak self] in
+            if let macHost{macHost.action()}else{wakeSwiftBar()}
+            if macHost==nil{DispatchQueue.main.asyncAfter(deadline:.now()+0.8){[weak self] in
                 guard let self,self.pendingAction==id,FileManager.default.fileExists(atPath:request.path) else{return}
                 // Retry only the notification. SwiftBar atomically claims the same file at most once.
                 self.wakeSwiftBar()
-            }
+            }}
             let task=DispatchWorkItem{[weak self] in
                 guard let self,self.pendingAction==id else{return}
                 self.checkAction()

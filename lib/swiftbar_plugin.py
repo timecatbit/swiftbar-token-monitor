@@ -76,8 +76,9 @@ CONFIG_FILE = os.path.join(OCX_HOME, "config.json")
 SERVICE_LOG = os.path.join(OCX_HOME, "service.log")
 RELEASES_URL = "https://github.com/lidge-jun/opencodex/releases/latest"
 KOMARI_BASE_URL = os.environ.get("KOMARI_BASE_URL", "").rstrip("/")
-VERSION = "5.19.0"
+VERSION = "5.20.0"
 PRODUCT = "Token Monitor"
+MAC_APP = sys.platform=="darwin" and os.environ.get("OCX_MAC_APP")=="1"
 AUTHOR = "minicoke"
 REPOSITORY = "https://github.com/timecatbit/swiftbar-token-monitor"
 # The repository regenerates its price tables daily from ccusage; plugins fetch the committed copies.
@@ -1298,6 +1299,7 @@ def update_rows(data):
 
 def send_update_notification(rows):
     body='；'.join(row['name']+' '+row['latest'] for row in rows)
+    if MAC_APP:return post_notice('应用有新版本',body)
     if DESKTOP is not None:return DESKTOP.notice('应用有新版本',body)
     url='swiftbar://notify?'+urllib.parse.urlencode({'plugin':SWIFTBAR_NAME,'title':'应用有新版本',
          'body':body,'subtitle':'打开星星 → Harness 更新查看','silent':'true',
@@ -1347,6 +1349,13 @@ def version_tuple(text):
     return tuple(int(part) for part in match.groups()) if match else None
 
 
+def update_asset_name(version):
+    if MAC_APP:
+        architecture='AppleSilicon-arm64' if platform.machine()=='arm64' else 'Intel-x64'
+        return 'TokenMonitor-'+version+'-macOS-'+architecture+'.dmg'
+    return 'token-monitor-%s%s.zip'%(version,'-windows-x64' if DESKTOP is not None else '')
+
+
 def self_update_web():
     """Discover a release via its public page when the anonymous API is rate-limited."""
     try:
@@ -1356,8 +1365,7 @@ def self_update_web():
         if not match:return None
         version=match[1]
         if version_tuple(version)<=version_tuple(VERSION):return {'latest':version,'page':page,'assets':[]}
-        # The Windows app looks for its own archive, which a release lists beside the macOS one.
-        name='token-monitor-%s%s.zip'%(version,'-windows-x64' if DESKTOP is not None else '')
+        name=update_asset_name(version)
         url=REPOSITORY+'/releases/download/v%s/%s'%(version,name)
         fields=download(url+'.sha256',4096).decode('ascii').split()
         if len(fields)!=2 or fields[1].removeprefix('*')!=name or not re.fullmatch(r'[0-9a-f]{64}',fields[0]):
@@ -1418,8 +1426,8 @@ def self_update_lines(data):
     """A homepage row under Harness 更新, present only while a newer Token Monitor release exists."""
     release=plugin_update(data);state=self_update_state()
     if not release:return []
-    if DESKTOP is not None:
-        asset='token-monitor-'+release['latest']+'-windows-x64.zip'
+    if MAC_APP or DESKTOP is not None:
+        asset=update_asset_name(release['latest'])
         if not any(a.get('name')==asset for a in release.get('assets',[])):return []
         return [item(PRODUCT,badge='可更新 '+release['latest'],panelattention=True,sfimage='sparkles'),
                 item('打开 GitHub 发布页',level=1,href=REPOSITORY+'/releases/tag/v'+release['latest'],sfimage='arrow.up.right')]
@@ -1975,7 +1983,7 @@ def refresh_resource(source):
     schedule_background_refresh()
 
 def refresh_swiftbar():
-    if DESKTOP is not None:return
+    if MAC_APP or DESKTOP is not None:return
     try:subprocess.run(['/usr/bin/open','-g','swiftbar://refreshplugin?name='+urllib.parse.quote(SWIFTBAR_NAME)],capture_output=True,timeout=4)
     except (OSError,subprocess.SubprocessError):pass
 
@@ -2085,6 +2093,11 @@ def alert_notice(alert):
 
 
 def post_notice(subtitle,body):
+    if MAC_APP:
+        if read_cache('notifications-enabled').get('allowed') is not True:return False
+        path=cache_path('notice-'+uuid.uuid4().hex)
+        write_json_cache(path,{'subtitle':subtitle,'body':body})
+        return os.path.isfile(path)
     if DESKTOP is not None:return DESKTOP.notice(subtitle,body)
     url='swiftbar://notify?'+urllib.parse.urlencode({'plugin':SWIFTBAR_NAME,'title':PRODUCT,'subtitle':subtitle,'body':body,
          'href':'swiftbar://refreshplugin?name='+urllib.parse.quote(SWIFTBAR_NAME)})
@@ -2184,6 +2197,7 @@ def schedule_background_refresh():
 
 
 def launch_background(mode):
+    if MAC_APP:return  # The AppKit host coalesces refresh work in its own process queue.
     if DESKTOP is not None:
         DESKTOP.request_refresh(mode);return
     try:
@@ -3455,6 +3469,11 @@ def presentation_settings():
 
 def panel_snapshot(data,dashboard=None,options=None):
     dashboard=dashboard if dashboard is not None else dashboard_payload(data)
+    if MAC_APP:
+        def without_new_bridge(entries):
+            return [dict(entry,children=without_new_bridge(entry.get('children',[]))) for entry in entries
+                    if entry.get('action')!=['set-claude-local','true']]
+        options=without_new_bridge(options if options is not None else module_options(data))
     return {"schema":1,"project":{"name":PRODUCT,"url":REPOSITORY},"dashboard":dashboard,
             "entries":resource_panel_entries(data),"rangeOptions":range_options(dashboard['rangeKey']),
             "moduleOptions":options if options is not None else module_options(data),
@@ -3690,6 +3709,7 @@ def run_action(name, extra):
         invalidate_caches(['claude_subscription']);schedule_background_refresh()
     elif name == 'set-claude-local':
         value=extra[0] if len(extra)==1 else ''
+        if MAC_APP and value=='true':raise ValueError('standalone status-line setup unavailable')
         if value not in ('true','false'):raise ValueError('invalid local Claude setting')
         if value=='true':
             if not confirm('启用本机用量回传？','在 '+str(claude_local.settings_path())+' 中连接官方状态栏回调。只保存订阅百分比、重置时间和更新时间，不读取 Cookie 或对话内容。已有状态栏会备份并继续执行，关闭时恢复。\n需等待 Claude Code 产生响应后才会有新数据。',accept='启用'):return
@@ -3717,7 +3737,7 @@ def run_action(name, extra):
         helptext=subprocess.run([binary,'--help'],capture_output=True,text=True,check=True,timeout=5).stdout
         if not re.search(r'^\s+update(?:\s|\|)',helptext,re.M):
             dialog_error('当前版本不支持 update 命令','请通过官方安装方式更新。');return
-        refresh_url='swiftbar://refreshplugin?name='+urllib.parse.quote(SWIFTBAR_NAME)
+        refresh_url=None if MAC_APP else 'swiftbar://refreshplugin?name='+urllib.parse.quote(SWIFTBAR_NAME)
         terminal(terminal_jobs.update_command(binary,key,STATE_DIR,refresh_url))
     elif name == 'open-cli-update-log':
         if extra or not module_enabled('updates'):raise ValueError('invalid update log action')
