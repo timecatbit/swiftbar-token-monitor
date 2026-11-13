@@ -12,3 +12,6 @@ fonts installed with Windows.
 - Qt 6.8.3 source: <https://download.qt.io/archive/qt/6.8/6.8.3/single/>
 - Qt for Python build instructions: <https://doc.qt.io/qtforpython-6.8/building_from_source/index.html>
 - PyInstaller: <https://github.com/pyinstaller/pyinstaller>
+- The setup program is made with Inno Setup, © Jordan Russell and Martijn Laan,
+  <https://jrsoftware.org/isinfo.php>, using its Simplified Chinese messages.
+  Its licence is in the source repository at `windows/installer/INNO-LICENSE.txt`.

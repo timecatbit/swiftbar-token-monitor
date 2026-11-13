@@ -413,6 +413,9 @@ def main():
     if lock is None:
         if not options.background:QMessageBox.information(None,'Token Monitor','已在运行，请点任务栏右下角的星星。')
         return 0
+    # The installer and uninstaller look for this name (AppMutex) and ask to quit the tray first.
+    # Windows releases the handle when the process exits.
+    ctypes.windll.kernel32.CreateMutexW(None,False,'TokenMonitorTray')
     if not QSystemTrayIcon.isSystemTrayAvailable():
         QMessageBox.warning(None,'Token Monitor','未找到系统托盘，请登录 Windows 桌面后重试。');return 2
     import swiftbar_plugin as m

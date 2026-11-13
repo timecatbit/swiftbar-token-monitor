@@ -122,15 +122,19 @@ def tool(text,hint,callback):
     return button
 
 
-def star():
-    pix=QPixmap(64,64);pix.fill(Qt.transparent)
-    p=QPainter(pix);p.setRenderHint(QPainter.Antialiasing)
+def star_pixmap(size=64):
+    pix=QPixmap(size,size);pix.fill(Qt.transparent)
+    p=QPainter(pix);p.setRenderHint(QPainter.Antialiasing);p.scale(size/64,size/64)
     for x,y,r in [(35,37,20),(15,19,10),(46,13,7)]:
         path=QPainterPath();path.moveTo(x,y-r)
         for px,py,ex,ey in [(x+2,y-2,x+r,y),(x+2,y+2,x,y+r),(x-2,y+2,x-r,y),(x-2,y-2,x,y-r)]:
             path.quadTo(px,py,ex,ey)
         p.setPen(QPen(QColor('#283747'),2));p.setBrush(QColor('#f6f9fc'));p.drawPath(path)
-    p.end();return QIcon(pix)
+    p.end();return pix
+
+
+def star():
+    return QIcon(star_pixmap())
 
 
 def icon(entry):

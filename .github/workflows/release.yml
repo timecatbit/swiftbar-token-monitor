@@ -87,4 +87,5 @@ jobs:
           gh release create "$GITHUB_REF_NAME" --verify-tag --title "token-monitor $version" \
             --notes-file dist/release-notes.md \
             "dist/token-monitor-$version.zip" "dist/token-monitor-$version.zip.sha256" \
-            "dist/token-monitor-$version-windows-x64.zip" "dist/token-monitor-$version-windows-x64.zip.sha256"
+            "dist/token-monitor-$version-windows-x64.zip" "dist/token-monitor-$version-windows-x64.zip.sha256" \
+            "dist/token-monitor-$version-windows-x64-setup.exe" "dist/token-monitor-$version-windows-x64-setup.exe.sha256"

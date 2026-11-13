@@ -51,6 +51,23 @@ class WindowsHostTests(unittest.TestCase):
         build=(ROOT/'windows/build.ps1').read_text(encoding='utf-8')
         for name in ('LGPL-3.0.txt','GPL-3.0.txt','Python-LICENSE.txt'):self.assertIn(name,build)
 
+    def test_installer_names_match_the_app_it_installs(self):
+        import re
+        iss=(ROOT/'windows/installer/token-monitor.iss').read_text(encoding='utf-8-sig')
+        build=(ROOT/'windows/build.ps1').read_text(encoding='utf-8')
+        app=(ROOT/'windows/token_monitor.py').read_text(encoding='utf-8')
+        source=(ROOT/'windows/host.py').read_text(encoding='utf-8')
+        # The build's install check looks up the uninstall entry by the same AppId.
+        app_id=re.search(r'AppId=\{\{([0-9A-F-]{36})\}',iss)[1]
+        self.assertIn('{'+app_id+'}_is1',build)
+        self.assertIn("CreateMutexW(None,False,'%s')"%re.search(r'AppMutex=(\S+)',iss)[1],app)
+        self.assertIn("SetCurrentProcessExplicitAppUserModelID('%s')"%re.search(r'AppUserModelID: "([^"]+)"',iss)[1],app)
+        # Setup re-points and the uninstaller removes the very entry the tray menu writes.
+        self.assertIn("name='TokenMonitor'",source);self.assertIn("RunValue = 'TokenMonitor'",iss)
+        self.assertIn("'--background'",source);self.assertIn('" --background\'',iss)
+        messages=(ROOT/'windows/installer/ChineseSimplified.isl').read_bytes().decode('utf-8')
+        self.assertIn('LanguageID=$0804',messages)
+
     def test_nested_entries_do_not_invoke_platform_specific_or_file_urls(self):
         sep={'label':'','separator':True,'children':[]}
         supported={'label':'选择目录','action':['choose-source','magpie'],'children':[]}
