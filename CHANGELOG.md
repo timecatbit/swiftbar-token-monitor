@@ -1,5 +1,13 @@
 # 更新记录
 
+## 5.19.0
+
+- Windows 版新增安装包（Release 里带 windows-x64-setup 的 EXE）：只为当前用户安装、不需要管理员权限，建开始菜单快捷方式，可在“设置 → 应用”里卸载；桌面快捷方式和登录时启动可在安装时勾选。
+- 升级时直接运行新版安装包；Token Monitor 正在运行时会先请你从托盘退出，卸载保留设置、Key 与缓存。
+- Windows 版分享按钮可以“复制图片”，直接粘贴到聊天里，复制成功时标题旁显示“已复制”；也可以照旧保存 PNG。
+- Windows 版的程序、快捷方式和卸载项都用星星图标。
+- Windows 下载文件的校验文件在 macOS 和 Linux 上也能直接用 `shasum -c` 核对。
+
 ## 5.18.1
 
 - 修复 Windows 版一打开就报错“QLockFile.tryLock() takes exactly one argument”、无法启动的问题。
