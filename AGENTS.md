@@ -78,5 +78,5 @@
 - Windows 状态保存在用户的 LocalAppData，启动项只在用户勾选后写 HKCU；启动后单实例。Windows 构建及离线冒烟测试通过 `windows/build.ps1` 与 Windows CI。真实托盘定位、键鼠及深浅色另外在 Windows 桌面核对。
 
 
-- macOS 独立版使用同一 AppKit 面板和 Python 数据后端；宿主自己提供星星、登录项和通知，不能触发 SwiftBar URL。两版可复用用户配置和 Key，但快照、锁和动作回执必须在不同缓存目录。独立版已有的 Claude 本机回传可读或关闭；不要新写指向可移走 App bundle 的状态栏命令。
-- macOS 独立版分别构建 Apple 芯片 arm64 和 Intel x64 DMG，每包内置对应架构的可移植 Python。发布页顶部使用按系统与芯片排列的下载表，DMG 内写明机型、拖拽安装和公证状态。附件的文件名、页面标签（GitHub 显示标签而不是文件名，按文件名排序）和下载表都来自 `scripts/package.py` 的 `downloads`：文件名统一为 `token-monitor-<版本>-macos-apple-silicon.dmg`、`-macos-intel.dmg`、`-windows-x64-setup.exe`、`-windows-x64.zip`，标签写“系统 · 芯片/形式”；SwiftBar 插件永远是 `token-monitor-<版本>.zip`（所有已安装的插件按这个名字自更新）。改名必须同步 `update_asset_name`，旧版本按旧名找更新。构建只在确认签名身份和公证资料时做 Developer ID 公证，未公证包不得宣称已公证。
+- macOS 独立版使用同一 AppKit 面板和 Python 数据后端；宿主自己提供星星、登录项和通知，不能触发 SwiftBar URL；首次启动请求一次通知权限（用户答复后系统不再询问），右键菜单在未授权时写“开启系统通知…”、已授权时写“通知设置…”，答复过的情况打开系统的通知设置。两版可复用用户配置和 Key，但快照、锁和动作回执必须在不同缓存目录。独立版已有的 Claude 本机回传可读或关闭；不要新写指向可移走 App bundle 的状态栏命令。
+- macOS 独立版分别构建 Apple 芯片 arm64 和 Intel x64 DMG，每包内置对应架构的可移植 Python。发布页顶部使用按系统与芯片排列的下载表，DMG 内写明机型、拖拽安装和公证状态。附件的文件名、页面标签（GitHub 显示标签而不是文件名，按文件名排序）和下载表都来自 `scripts/package.py` 的 `downloads`：文件名统一为 `token-monitor-<版本>-macos-apple-silicon.dmg`、`-macos-intel.dmg`、`-windows-x64-setup.exe`、`-windows-x64.zip`，标签只用英文、写“系统 · 芯片/形式”（如 `Mac · Apple Silicon`、`Windows · Installer`），仓库与 DMG 里的文件名也不用中文；SwiftBar 插件永远是 `token-monitor-<版本>.zip`（所有已安装的插件按这个名字自更新）。改名必须同步 `update_asset_name`，旧版本按旧名找更新。构建只在确认签名身份和公证资料时做 Developer ID 公证，未公证包不得宣称已公证。

@@ -1567,11 +1567,24 @@ final class MacHost {
             DispatchQueue.main.async{self.refresh()}
         }
     }
-    func checkNotifications() {
+    private(set) var notificationsAllowed=false
+    private var askedForNotifications=false
+    // On launch the app asks once, so usage and balance alerts work without a trip to the menu; once the
+    // user has answered, the system keeps that answer and the request never shows again.
+    func checkNotifications(askFirst:Bool=false) {
         UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
             DispatchQueue.main.async {
-                guard let self,let path=self.snapshotPath else{return}
+                guard let self else{return}
+                if askFirst,settings.authorizationStatus == .notDetermined,!self.askedForNotifications {
+                    self.askedForNotifications=true
+                    UNUserNotificationCenter.current().requestAuthorization(options:[.alert,.sound]){[weak self] _,_ in
+                        DispatchQueue.main.async{self?.checkNotifications()}
+                    }
+                    return
+                }
+                guard let path=self.snapshotPath else{return}
                 let enabled=settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
+                self.notificationsAllowed=enabled
                 let url=URL(fileURLWithPath:path).deletingLastPathComponent().appendingPathComponent("notifications-enabled.json")
                 let data=Data((enabled ? "{\"schema\":1,\"allowed\":true}" : "{\"schema\":1,\"allowed\":false}").utf8)
                 if (try? Data(contentsOf:url)) != data{try? data.write(to:url,options:.atomic)}
@@ -1630,7 +1643,7 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
                     if self.requestedHome != nil{self.showActionFailure("无法初始化本机数据，请重新打开 Token Monitor。")}
                     return
                 }
-                self.snapshotPath=path;self.observeSnapshot();host.checkNotifications();host.refresh()
+                self.snapshotPath=path;self.observeSnapshot();host.checkNotifications(askFirst:true);host.refresh()
                 self.refreshTimer=Timer.scheduledTimer(withTimeInterval:60,repeats:true){[weak host] _ in host?.refresh()}
                 self.refreshTimer?.tolerance=12
                 if let modules=self.requestedHome{self.requestedHome=nil;self.managerOnly=modules;self.show()}
@@ -1662,7 +1675,7 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
             _=add("自动检测…",#selector(standaloneDetect))
             menu.addItem(.separator())
             let login=add("登录时启动",#selector(toggleLogin));login.state=SMAppService.mainApp.status == .enabled ? .on : .off
-            _=add("开启系统通知…",#selector(allowNotices))
+            _=add(macHost?.notificationsAllowed == true ? "通知设置…" : "开启系统通知…",#selector(allowNotices))
             _=add("关于 Token Monitor",#selector(standaloneAbout))
             menu.addItem(.separator())
             _=add("退出 Token Monitor",#selector(quitStandalone))
@@ -1684,9 +1697,18 @@ final class App:NSObject,NSApplicationDelegate,NSMenuDelegate,NSSharingServicePi
             else{try SMAppService.mainApp.register()}
         }catch{showActionFailure("请将 Token Monitor 拖到「应用程序」后重试，或检查系统设置中的登录项。")}
     }
+    // Not asked yet: ask. Answered: the system shows no second request, so open this app's notification settings.
     @objc private func allowNotices(){
-        UNUserNotificationCenter.current().requestAuthorization(options:[.alert,.sound]){[weak self] _,_ in
-            DispatchQueue.main.async{self?.macHost?.checkNotifications()}
+        UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
+            DispatchQueue.main.async {
+                if settings.authorizationStatus == .notDetermined {
+                    UNUserNotificationCenter.current().requestAuthorization(options:[.alert,.sound]){[weak self] _,_ in
+                        DispatchQueue.main.async{self?.macHost?.checkNotifications()}
+                    }
+                }else if let url=URL(string:"x-apple.systempreferences:com.apple.preference.notifications?id="+(Bundle.main.bundleIdentifier ?? "")) {
+                    NSWorkspace.shared.open(url)
+                }
+            }
         }
     }
     @objc private func standaloneAbout(){
