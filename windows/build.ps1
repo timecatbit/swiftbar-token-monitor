@@ -84,7 +84,8 @@ if (-not (Test-Path -LiteralPath $Preview)) { throw "Packaged Windows smoke test
 
 function Write-Checksum([string]$Path) {
     $Hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
-    "$Hash  $(Split-Path -Leaf $Path)" | Set-Content -LiteralPath "$Path.sha256" -Encoding ascii
+    # A plain LF line, so `shasum -c` on macOS and Linux reads the name without a trailing CR.
+    [IO.File]::WriteAllText("$Path.sha256", "$Hash  $(Split-Path -Leaf $Path)`n", [Text.Encoding]::ASCII)
 }
 $Archive = Join-Path $Dist "$Name.zip"
 Compress-Archive -LiteralPath $App -DestinationPath $Archive -Force
