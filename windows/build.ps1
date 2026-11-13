@@ -48,6 +48,13 @@ Get-ChildItem -LiteralPath $Site -Directory -Filter "*.dist-info" | ForEach-Obje
         }
     }
 }
+# PySide6's Windows wheels carry only Qt's commercial notice, so the LGPL the app uses Qt under, and the
+# GPL it builds on, ship from this repository. Python's licence covers the embedded interpreter and the
+# libraries its Windows build includes.
+Copy-Item -LiteralPath "windows/licenses/LGPL-3.0.txt", "windows/licenses/GPL-3.0.txt" -Destination $Notice
+$PythonLicense = Join-Path (python -c "import sys; print(sys.base_prefix)") "LICENSE.txt"
+if (-not (Test-Path -LiteralPath $PythonLicense)) { throw "Python's LICENSE.txt was not found." }
+Copy-Item -LiteralPath $PythonLicense -Destination (Join-Path $Notice "Python-LICENSE.txt")
 $env:QT_QPA_PLATFORM = "offscreen"
 # Offscreen Qt reads fonts from a folder rather than asking Windows, and the bundle ships none, so the
 # smoke picture showed every character as a box. Point it at the system fonts.

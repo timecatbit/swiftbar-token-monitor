@@ -43,6 +43,14 @@ class WindowsHostTests(unittest.TestCase):
             host.log_failure(tmp,'idle')
             self.assertEqual(len((Path(tmp)/'logs/tray.log').read_text(encoding='utf-8').splitlines()),1)
 
+    def test_build_ships_the_licences_qt_is_used_under(self):
+        # PySide6's wheels carry only Qt's commercial notice; the LGPL and the GPL it extends come from here.
+        texts=ROOT/'windows/licenses'
+        self.assertIn('GNU LESSER GENERAL PUBLIC LICENSE',(texts/'LGPL-3.0.txt').read_text(encoding='utf-8')[:200])
+        self.assertIn('GNU GENERAL PUBLIC LICENSE',(texts/'GPL-3.0.txt').read_text(encoding='utf-8')[:200])
+        build=(ROOT/'windows/build.ps1').read_text(encoding='utf-8')
+        for name in ('LGPL-3.0.txt','GPL-3.0.txt','Python-LICENSE.txt'):self.assertIn(name,build)
+
     def test_nested_entries_do_not_invoke_platform_specific_or_file_urls(self):
         sep={'label':'','separator':True,'children':[]}
         supported={'label':'选择目录','action':['choose-source','magpie'],'children':[]}
