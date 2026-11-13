@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
+import traceback
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,6 +58,21 @@ def prepare_environment(state):
     os.environ['OCX_STATE_DIR']=str(state)
     os.environ.setdefault('OCX_CACHE_DIR',str(state/'cache'))
     os.environ.update(overrides(state/'config.local.json'))
+
+
+def log_failure(state,where):
+    """Record the exception being handled: its type and where it was raised. Messages can carry paths,
+    addresses or server replies, so they are never written; neither are local values."""
+    kind,_,trace=sys.exc_info()
+    if kind is None:return
+    frames=' < '.join(f'{Path(f.filename).name}:{f.lineno} {f.name}' for f in reversed(traceback.extract_tb(trace)[-6:]))
+    path=Path(state)/'logs'/'tray.log'
+    try:
+        path.parent.mkdir(parents=True,exist_ok=True)
+        if path.exists() and path.stat().st_size>256*1024:path.replace(path.with_name('tray.log.1'))
+        with path.open('a',encoding='utf-8') as out:
+            out.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {where} {kind.__name__} at {frames}\n")
+    except OSError:pass
 
 
 def filter_entries(entries):

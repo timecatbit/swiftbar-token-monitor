@@ -134,6 +134,7 @@ class Desktop(QObject):
             m.background_refresh()
             snapshot=m.panel_snapshot(m.cached_data())
         except Exception:
+            host.log_failure(self.state,'refresh')
             if snapshot is None and not self.reported_failure:
                 self.reported_failure=True
                 self.message.emit('本机数据读取失败','可从托盘菜单打开设置，或稍后重试。')
@@ -177,6 +178,7 @@ class Desktop(QObject):
             self.panel.interacting+=1
             self.m.run_action(name,extra)
         except (OSError,ValueError,RuntimeError):
+            host.log_failure(self.state,'action '+name)
             self.error('操作未完成','请检查本机路径或连接设置后重试。')
         finally:
             self.panel.interacting-=1
@@ -201,7 +203,9 @@ class Desktop(QObject):
         if self.exiting:return
         future,done=value
         try:result=future.result()
-        except Exception:self.error('操作未完成','请检查本机设置或稍后重试。')
+        except Exception:
+            host.log_failure(self.state,'command')
+            self.error('操作未完成','请检查本机设置或稍后重试。')
         else:
             if done is not None:done(result)
         self.request_refresh('command')

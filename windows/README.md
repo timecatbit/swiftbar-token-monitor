@@ -12,7 +12,8 @@
 - **配置**：通过「主页模块」选择目录或添加 API Key；地址、路径和选项保存在
   `%LOCALAPPDATA%\Token Monitor\config.local.json`，在应用内输入的 API Key 单独保存在
   该用户目录下的 `keys`，不进入统计缓存。用量缓存与更新日志也在此用户目录。
-  高级配置修改后，退出再打开生效。应用不执行配置文件。
+  高级配置修改后，退出再打开生效。应用不执行配置文件。读取或操作出错时，
+  `logs\tray.log` 只记下错误类型和代码位置，不写错误内容、路径或密钥，反馈问题时可附上。
 - **已有记录**：扫描 Codex 活动及归档会话、Claude App 登记会话、Magpie、OpenCode、
   DeepSeek Harness 等受支持的本机日志。便携版 Magpie 或 WSL 里的日志可以手选目录；
   Windows 不会自动扫描所有 WSL 发行版。Summary 仍会对本机和网关日志去重。

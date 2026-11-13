@@ -31,6 +31,18 @@ class WindowsHostTests(unittest.TestCase):
                 self.assertEqual(os.environ['ANTHROPIC_API_KEY'],'')
                 for key in ('OPENAI_API_KEY','OCX_HOME','PATH'):self.assertNotIn(key,os.environ)
 
+    def test_failure_log_keeps_type_and_place_but_never_the_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            def read_key():raise ValueError('sk-secret-value at C:\\Users\\someone')
+            try:read_key()
+            except ValueError:host.log_failure(tmp,'refresh')
+            text=(Path(tmp)/'logs/tray.log').read_text(encoding='utf-8')
+            self.assertIn('refresh ValueError at test_windows.py:',text)
+            self.assertIn('read_key',text)
+            self.assertNotIn('secret',text);self.assertNotIn('someone',text)
+            host.log_failure(tmp,'idle')
+            self.assertEqual(len((Path(tmp)/'logs/tray.log').read_text(encoding='utf-8').splitlines()),1)
+
     def test_nested_entries_do_not_invoke_platform_specific_or_file_urls(self):
         sep={'label':'','separator':True,'children':[]}
         supported={'label':'选择目录','action':['choose-source','magpie'],'children':[]}
