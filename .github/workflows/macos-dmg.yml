@@ -48,5 +48,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: token-monitor-macos-${{ matrix.artifact }}
-          path: dist/*.dmg*
+          path: dist/*.dmg
           if-no-files-found: error

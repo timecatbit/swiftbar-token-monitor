@@ -1350,14 +1350,15 @@ def version_tuple(text):
 
 
 def update_asset_name(version):
+    """The release file this copy updates from; scripts/package.py publishes these names."""
     if MAC_APP:
-        architecture='AppleSilicon-arm64' if platform.machine()=='arm64' else 'Intel-x64'
-        return 'TokenMonitor-'+version+'-macOS-'+architecture+'.dmg'
+        return 'token-monitor-%s-macos-%s.dmg'%(version,'apple-silicon' if platform.machine()=='arm64' else 'intel')
     return 'token-monitor-%s%s.zip'%(version,'-windows-x64' if DESKTOP is not None else '')
 
 
 def self_update_web():
-    """Discover a release via its public page when the anonymous API is rate-limited."""
+    """Discover a release via its public pages when the anonymous API is rate-limited. The asset list
+    the release page loads names each file with the SHA-256 GitHub computed, as the API would."""
     try:
         req=urllib.request.Request(REPOSITORY+'/releases/latest',headers={'User-Agent':'TokenMonitor/'+VERSION})
         with urllib.request.urlopen(req,timeout=8) as response:page=response.geturl()
@@ -1365,13 +1366,15 @@ def self_update_web():
         if not match:return None
         version=match[1]
         if version_tuple(version)<=version_tuple(VERSION):return {'latest':version,'page':page,'assets':[]}
-        name=update_asset_name(version)
-        url=REPOSITORY+'/releases/download/v%s/%s'%(version,name)
-        fields=download(url+'.sha256',4096).decode('ascii').split()
-        if len(fields)!=2 or fields[1].removeprefix('*')!=name or not re.fullmatch(r'[0-9a-f]{64}',fields[0]):
-            return None
-        return {'latest':version,'page':page,'assets':[{'name':name,'url':url,'digest':'sha256:'+fields[0]},
-                                                      {'name':name+'.sha256','url':url+'.sha256'}]}
+        listing=download(REPOSITORY+'/releases/expanded_assets/v'+version,1024*1024).decode('utf-8','replace')
+        folder=urllib.parse.urlparse(REPOSITORY).path+'/releases/download/v'+version+'/'
+        assets=[]
+        for row in listing.split('<li')[1:]:
+            link=re.search(r'href="'+re.escape(folder)+r'([\w.+-]+)"',row);digest=re.search(r'sha256:([0-9a-f]{64})\b',row)
+            if link and digest:
+                assets.append({'name':link[1],'url':REPOSITORY+'/releases/download/v%s/%s'%(version,link[1]),'digest':'sha256:'+digest[1]})
+        if not any(a['name']==update_asset_name(version) for a in assets):return None
+        return {'latest':version,'page':page,'assets':assets}
     except (OSError,ValueError,SelfUpdateError):
         return None
 
@@ -1465,11 +1468,10 @@ def install_release(version,log):
     name='token-monitor-%s.zip'%version;expected=REPOSITORY+'/releases/download/v%s/%s'%(version,name)
     assets={a['name']:a for a in release['assets']}
     if assets.get(name,{}).get('url')!=expected:raise SelfUpdateError('发布中没有安装包')
+    # GitHub computes each asset's SHA-256 itself; releases publish no separate checksum files.
     digest=assets[name].get('digest') or ''
-    if digest.startswith('sha256:'):digest=digest[7:]
-    else:
-        if assets.get(name+'.sha256',{}).get('url')!=expected+'.sha256':raise SelfUpdateError('发布中没有校验值')
-        digest=(download(expected+'.sha256',4096).decode('utf-8','replace').split() or [''])[0]
+    if not digest.startswith('sha256:'):raise SelfUpdateError('发布中没有校验值')
+    digest=digest[7:]
     if not re.fullmatch(r'[0-9a-f]{64}',digest):raise SelfUpdateError('校验值格式错误')
     archive=download(expected,50*1024*1024)
     if hashlib.sha256(archive).hexdigest()!=digest:raise SelfUpdateError('安装包校验失败')

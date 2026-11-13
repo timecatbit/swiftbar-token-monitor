@@ -82,14 +82,8 @@ function Invoke-Bounded([string]$What, [string]$File, [string[]]$Arguments, [int
 Invoke-Bounded "Smoke test of the built program" (Join-Path $App "Token Monitor.exe") @("--self-test", "--preview", ('"' + $Preview + '"')) 180
 if (-not (Test-Path -LiteralPath $Preview)) { throw "Packaged Windows smoke test drew no preview." }
 
-function Write-Checksum([string]$Path) {
-    $Hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
-    # A plain LF line, so `shasum -c` on macOS and Linux reads the name without a trailing CR.
-    [IO.File]::WriteAllText("$Path.sha256", "$Hash  $(Split-Path -Leaf $Path)`n", [Text.Encoding]::ASCII)
-}
 $Archive = Join-Path $Dist "$Name.zip"
 Compress-Archive -LiteralPath $App -DestinationPath $Archive -Force
-Write-Checksum $Archive
 Write-Output $Archive
 
 # The installer: the same folder for this user only, with a Start menu shortcut and an uninstall entry.
@@ -140,5 +134,4 @@ if ((Test-Path -LiteralPath $InstalledExe) -or (Test-Path -LiteralPath $Shortcut
 if (Get-ItemProperty -LiteralPath $RunKey -Name "TokenMonitor" -ErrorAction SilentlyContinue) { throw "Uninstalling left the sign-in entry behind." }
 Write-Host "$(Get-Date -Format HH:mm:ss) Installer checks passed"
 Remove-Item Env:QT_QPA_PLATFORM, Env:QT_QPA_FONTDIR
-Write-Checksum $Setup
 Write-Output $Setup

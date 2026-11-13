@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Package the native menu bar app with a relocatable, architecture-matched runtime."""
 import argparse
-import hashlib
 import os
 from pathlib import Path
 import platform
@@ -12,11 +11,12 @@ import tempfile
 
 from build import build
 from install_transport import prepare
-from package import version
+from package import downloads, version
 
 ROOT=Path(__file__).resolve().parents[1]
-ARCHES={'arm64':('AppleSilicon-arm64','Apple 芯片（M 系列）'),
-        'x86_64':('Intel-x64','Intel 处理器')}
+# The file name ends with the chip, as the release lists it; the volume name says the same in plain words.
+ARCHES={'arm64':('-macos-apple-silicon.dmg','Apple 芯片（M 系列）','Apple Silicon'),
+        'x86_64':('-macos-intel.dmg','Intel 处理器','Intel')}
 
 
 def bundled_runtime(python, target):
@@ -63,9 +63,9 @@ def smoke(app, root):
 
 def dmg(output, python, identity, notary):
     arch=platform.machine()
-    suffix,chip=ARCHES[arch];release=version()
+    suffix,chip,volume_name=ARCHES[arch];release=version()
     output.mkdir(parents=True,exist_ok=True)
-    artifact=output/f'TokenMonitor-{release}-macOS-{suffix}.dmg'
+    artifact=output/next(file for file,_,_ in downloads(release) if file.endswith(suffix))
     with tempfile.TemporaryDirectory(prefix='token-monitor-dmg-') as temp:
         root=Path(temp);volume=root/'volume';volume.mkdir()
         app=build(volume/'Token Monitor.app')
@@ -99,13 +99,13 @@ def dmg(output, python, identity, notary):
             '2. 退出镜像，在「应用程序」打开 Token Monitor。菜单栏会出现星星。\n'
             '3. 左键看用量，右键管理模块、登录启动和通知。\n\n'
             '已经装过 SwiftBar 插件？设置和 Key 仍在本机，可先停用该插件，再打开独立版。\n'
-            '想继续用 SwiftBar？请下载 Release 里标明 SwiftBar 的 ZIP，不用安装此镜像。\n\n'
+            '想继续用 SwiftBar？请下载发布页里的「Mac · SwiftBar 插件」，不用安装此镜像。\n\n'
             + ('此包由 Developer ID 签名并提交 Apple 公证。\n' if notary else
-               '此预览未做 Apple 公证。若首次打开被拦，核对 GitHub 发布页的 SHA-256 后，'
+               '此预览未做 Apple 公证。若首次打开被拦，确认镜像下载自项目的 GitHub 发布页后，'
                '到「系统设置 → 隐私与安全性 → 仍要打开」。公司管理的 Mac 可能不允许放行。\n'),
             encoding='utf-8')
         target=root/artifact.name
-        subprocess.run(['hdiutil','create','-ov','-format','UDZO','-volname','Token Monitor · '+suffix,
+        subprocess.run(['hdiutil','create','-ov','-format','UDZO','-volname',f'Token Monitor ({volume_name})',
                         '-srcfolder',str(volume),str(target)],check=True)
         if identity!='-':subprocess.run(['codesign','--force','--sign',identity,'--timestamp',str(target)],check=True)
         if notary:
@@ -124,8 +124,6 @@ def dmg(output, python, identity, notary):
         finally:
             subprocess.run(['hdiutil','detach',str(mount)],check=True)
         shutil.move(target,artifact)
-    with artifact.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
-    artifact.with_suffix('.dmg.sha256').write_text(f'{digest}  {artifact.name}\n',encoding='ascii')
     print(artifact)
 
 

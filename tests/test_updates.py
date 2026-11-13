@@ -82,46 +82,69 @@ class UpdateTests(unittest.TestCase):
   self.assertEqual(row['value'],'可更新 99.0.0');self.assertTrue(row['attention'])
   self.assertTrue(any(c.get('href')==newer['page'] for c in row['children']))
   with patch.dict(os.environ,{'OCX_SELF_UPDATES':'0'}):self.assertNotIn('self_update',self.m.external_loaders())
+ def listing(self,version,files):
+  """The asset list a release page loads, shaped like GitHub's: a label in place of the name, then the digest."""
+  folder='/timecatbit/swiftbar-token-monitor/releases/download/v%s/'%version
+  rows=''.join('<li class="Box-row"><a href="%s%s" rel="nofollow"><span class="text-bold">Label</span></a>'
+               '<span class="Truncate-text">sha256:%s</span></li>\n'%(folder,name,digest) for name,digest in files.items())
+  return ('<ul>'+rows+'<li class="Box-row"><a href="/timecatbit/swiftbar-token-monitor/archive/refs/tags/v%s.zip">Source code</a></li></ul>'%version).encode()
  def test_plugin_release_remains_installable_when_github_api_is_rate_limited(self):
   import urllib.error
   repo=self.m.REPOSITORY
   page=repo+'/releases/tag/v99.0.0'
   name='token-monitor-99.0.0.zip';asset=repo+'/releases/download/v99.0.0/'+name
+  windows='token-monitor-99.0.0-windows-x64.zip'
   digest='a'*64
   blocked=urllib.error.HTTPError(self.m.RELEASES_API,403,'API rate limit exceeded',{},None)
   response=MagicMock();response.__enter__.return_value=response;response.geturl.return_value=page
-  with patch.object(self.m.urllib.request,'urlopen',side_effect=[blocked,response]) as fetch,patch.object(self.m,'download',return_value=(digest+'  '+name+'\n').encode()) as download:
+  listing=self.listing('99.0.0',{name:digest,windows:'b'*64})
+  with patch.object(self.m.urllib.request,'urlopen',side_effect=[blocked,response]) as fetch,patch.object(self.m,'download',return_value=listing) as download:
    release,error=self.m.self_update_load()
   self.assertIsNone(error)
   self.assertEqual(fetch.call_args.args[0].full_url,repo+'/releases/latest')
-  download.assert_called_once_with(asset+'.sha256',4096)
+  download.assert_called_once_with(repo+'/releases/expanded_assets/v99.0.0',1024*1024)
   self.assertEqual(release['assets'][0],{'name':name,'url':asset,'digest':'sha256:'+digest})
+  self.assertEqual([a['name'] for a in release['assets']],[name,windows])
   self.assertTrue(any('更新到 99.0.0' in row for row in self.m.self_update_lines({'self_update':release})))
-  # A missing or wrong checksum does not turn a failed lookup into an update offer.
-  with patch.object(self.m.urllib.request,'urlopen',side_effect=[blocked,response]),patch.object(self.m,'download',return_value=(digest+'  wrong.zip').encode()):
+  # A release without this copy's file does not turn a failed lookup into an update offer.
+  with patch.object(self.m.urllib.request,'urlopen',side_effect=[blocked,response]),patch.object(self.m,'download',return_value=self.listing('99.0.0',{windows:digest})):
    self.assertEqual(self.m.self_update_load(),(None,(403,'检查失败',None)))
   # The Windows app checks for its own archive, so a rate-limited lookup still offers it the release.
-  windows='token-monitor-99.0.0-windows-x64.zip'
   with patch.object(self.m,'DESKTOP',object()),patch.object(self.m.urllib.request,'urlopen',side_effect=[blocked,response]),\
-       patch.object(self.m,'download',return_value=(digest+'  '+windows+'\n').encode()) as download:
+       patch.object(self.m,'download',return_value=listing):
    release,error=self.m.self_update_load()
    self.assertIsNone(error)
-   download.assert_called_once_with(repo+'/releases/download/v99.0.0/'+windows+'.sha256',4096)
    self.assertTrue(any('可更新 99.0.0' in row for row in self.m.self_update_lines({'self_update':release})))
 
- def test_mac_app_only_offers_its_own_architecture_and_preserves_swiftbar_basename(self):
+ def test_each_copy_updates_from_a_file_the_release_publishes(self):
+  import importlib.util,sys
+  scripts=str(SOURCE.parent/'scripts')
+  sys.path.insert(0,scripts);self.addCleanup(sys.path.remove,scripts)
+  spec=importlib.util.spec_from_file_location('package_script',SOURCE.parent/'scripts/package.py')
+  package=importlib.util.module_from_spec(spec);spec.loader.exec_module(package)
+  published={name for name,_,_ in package.downloads('99.0.0')}
+  self.assertEqual(len(published),5)
+  self.assertIn(self.m.update_asset_name('99.0.0'),published)
+  with patch.object(self.m,'DESKTOP',object()):self.assertIn(self.m.update_asset_name('99.0.0'),published)
+  for machine in ('arm64','x86_64'):
+   with patch.object(self.m,'MAC_APP',True),patch.object(self.m.platform,'machine',return_value=machine):
+    self.assertIn(self.m.update_asset_name('99.0.0'),published)
+  # Every installed SwiftBar plugin fetches this name, so it never changes.
+  self.assertIn('token-monitor-99.0.0.zip',published)
+
+ def test_mac_app_only_offers_its_own_architecture(self):
   release={'latest':'99.0.0','assets':[{'name':'token-monitor-99.0.0.zip'},
-                                      {'name':'TokenMonitor-99.0.0-macOS-Intel-x64.dmg'}]}
+                                      {'name':'token-monitor-99.0.0-macos-intel.dmg'}]}
   self.assertEqual(self.m.update_asset_name('99.0.0'),'token-monitor-99.0.0.zip')
   with patch.object(self.m,'MAC_APP',True),patch.object(self.m.platform,'machine',return_value='arm64'):
    self.assertEqual(self.m.self_update_lines({'self_update':release}),[])
-   release['assets'].append({'name':'TokenMonitor-99.0.0-macOS-AppleSilicon-arm64.dmg'})
+   release['assets'].append({'name':'token-monitor-99.0.0-macos-apple-silicon.dmg'})
    lines='\n'.join(self.m.self_update_lines({'self_update':release}))
    self.assertIn('可更新 99.0.0',lines)
    self.assertIn('releases/tag/v99.0.0',lines)
    self.assertNotIn('update-self',lines)
   with patch.object(self.m,'MAC_APP',True),patch.object(self.m.platform,'machine',return_value='x86_64'):
-   self.assertEqual(self.m.update_asset_name('99.0.0'),'TokenMonitor-99.0.0-macOS-Intel-x64.dmg')
+   self.assertEqual(self.m.update_asset_name('99.0.0'),'token-monitor-99.0.0-macos-intel.dmg')
 
  def test_self_update_verifies_the_archive_and_runs_its_installer(self):
   import hashlib,io,zipfile
@@ -151,6 +174,10 @@ class UpdateTests(unittest.TestCase):
   payload=self.m.read_cache('self_update')['payload'];payload['assets'][0]['url']='https://evil.test/token-monitor-99.0.0.zip'
   self.m.write_json_cache(self.m.cache_path('self_update'),{'schema':1,'payload':payload,'fetchedAt':time.time()})
   with patch.object(self.m,'download',side_effect=AssertionError('downloaded')),self.assertRaises(self.m.SelfUpdateError):self.m.install_release('99.0.0',log)
+  # Without GitHub's digest nothing is downloaded: releases carry no separate checksum files.
+  payload['assets'][0].update(url=self.m.REPOSITORY+'/releases/download/v99.0.0/token-monitor-99.0.0.zip',digest='')
+  self.m.write_json_cache(self.m.cache_path('self_update'),{'schema':1,'payload':payload,'fetchedAt':time.time()})
+  with patch.object(self.m,'download',side_effect=AssertionError('downloaded')),self.assertRaisesRegex(self.m.SelfUpdateError,'没有校验值'):self.m.install_release('99.0.0',log)
  def test_self_update_row_offers_update_then_shows_progress(self):
   data={'self_update':{'latest':'99.0.0','page':self.m.REPOSITORY+'/releases','assets':[]}}
   self.assertTrue(any('param3=update-self' in line for line in self.m.self_update_lines(data)))

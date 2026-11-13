@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Package a release zip with a prebuilt panel, so users install without git or a Swift toolchain."""
 import argparse
-import hashlib
 from pathlib import Path
 import re
 import shutil
@@ -27,30 +26,37 @@ def version():
     return plugin.group(1)
 
 
+def downloads(number):
+    """What a release offers, in the order GitHub lists it (by file name): file, the label the page shows
+    instead of the name, and one line on who it is for. In-app updates look these names up, and the
+    SwiftBar plugin keeps the short name every installed copy still fetches."""
+    name = 'token-monitor-' + number
+    return [
+        (name + '-macos-apple-silicon.dmg', 'Mac · Apple 芯片（M 系列）', '独立版预览，拖进「应用程序」即可，自带运行环境'),
+        (name + '-macos-intel.dmg', 'Mac · Intel 芯片', '独立版预览，拖进「应用程序」即可，自带运行环境'),
+        (name + '-windows-x64-setup.exe', 'Windows · 安装程序（推荐）', 'Windows 10/11，双击安装，不需要管理员权限'),
+        (name + '-windows-x64.zip', 'Windows · 免安装版', '完整解压后运行文件夹里的 Token Monitor.exe'),
+        (name + '.zip', 'Mac · SwiftBar 插件', '已经在用 SwiftBar 时选，不分芯片'),
+    ]
+
+
 def release_notes(number):
-    """This version's CHANGELOG section, below a short install note for the release page."""
+    """This version's CHANGELOG section, below a short guide to the downloads for the release page."""
     changes = re.search(r'^## %s\n(.*?)(?=^## |\Z)' % re.escape(number), (ROOT / 'CHANGELOG.md').read_text(), re.M | re.S)
     if not changes:
         raise SystemExit('CHANGELOG.md has no section for ' + number)
-    base=f'{REPOSITORY}/releases/download/v{number}/'
-    choices=[
-        ('Mac · Apple M 系列',f'TokenMonitor-{number}-macOS-AppleSilicon-arm64.dmg','独立版预览 · 未公证，拖进「应用程序」'),
-        ('Mac · Intel',f'TokenMonitor-{number}-macOS-Intel-x64.dmg','独立版预览 · 未公证，拖进「应用程序」'),
-        ('Mac · 已在用 SwiftBar',f'TokenMonitor-{number}-macOS-SwiftBar-Plugin.zip','插件版，Apple 芯片和 Intel 通用'),
-        ('Windows 10/11 x64（推荐）',f'token-monitor-{number}-windows-x64-setup.exe','安装程序，直接双击'),
-        ('Windows x64 · 便携',f'token-monitor-{number}-windows-x64.zip','完整解压再运行，无需安装'),
-    ]
-    rows=''.join(f'| {system} | [下载]({base+file}) | {note} |\n' for system,file,note in choices)
-    install=('## 该下载哪个？\n\n'
-             '**Mac：**打开  → 关于本机，Apple M 系列选 Apple Silicon，Intel 处理器选 Intel。只下载一个。\n\n'
-             '| 你的电脑 | 安装包 | 怎么用 |\n| --- | --- | --- |\n'+rows+'\n'
-             f'**SwiftBar 用户：**解压插件 ZIP，进入解压目录运行 `python3 install.py`。'
-             f'已有插件的用户也可以在面板里点「更新到 {number}」。独立版无需 SwiftBar 或额外安装 Python。\n\n'
-             '**Mac 独立版预览未做 Apple 公证。** 若首次打开被拦，确认来自本发布页并核对 SHA-256 后，'
-             '到「系统设置 → 隐私与安全性 → 仍要打开」。公司管理的 Mac 可能不允许放行。\n\n'
-             '下方附件里的 `.sha256` 是校验文件。历史插件使用的短文件名已归入「兼容文件」，新用户从上表下载即可。\n\n'
-             '## 本版变化\n\n')
-    return install + changes.group(1).strip() + '\n'
+    base = '%s/releases/download/v%s/' % (REPOSITORY, number)
+    rows = ''.join('| %s | [下载](%s) | %s |\n' % (label, base + file, note) for file, label, note in downloads(number))
+    guide = ('## 该下载哪个？\n\n'
+             '| 你的电脑 | 安装包 | 说明 |\n| --- | --- | --- |\n' + rows + '\n'
+             '**Mac 选哪个芯片**：点屏幕左上角的苹果菜单 → 关于本机，显示「芯片：Apple M…」选 Apple 芯片，显示「处理器：Intel…」选 Intel。只下载一个。\n\n'
+             '**SwiftBar 插件**：解压后进入目录运行 `python3 install.py`。已经装了插件的，在面板「Harness 更新」下点'
+             '「更新到 %s」即可。\n\n'
+             '**Mac 独立版预览未做 Apple 公证**。首次打开被拦时，确认文件来自本发布页，再到「系统设置 → 隐私与安全性 → 仍要打开」。'
+             '公司管理的 Mac 可能不允许放行。\n\n'
+             '下方附件列表里，每个文件旁的 `sha256:` 就是它的校验值，不用另外下载。\n\n'
+             '## 本版变化\n\n' % number)
+    return guide + changes.group(1).strip() + '\n'
 
 
 def verify(archive, name):
@@ -99,9 +105,9 @@ def main():
         subprocess.run(['ditto', '-c', '-k', '--keepParent', '--norsrc', '--noextattr', '--noacl',
                         str(package), str(archive)], check=True)
     verify(archive, name)
-    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    (output / (archive.name + '.sha256')).write_text('%s  %s\n' % (digest, archive.name))
     (output / 'release-notes.md').write_text(notes)
+    # What the publish step uploads, as gh's file#label arguments.
+    (output / 'release-assets.txt').write_text(''.join('%s#%s\n' % (file, label) for file, label, _ in downloads(number)))
     print(archive)
 
 
