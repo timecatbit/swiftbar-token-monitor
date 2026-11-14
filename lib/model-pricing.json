@@ -1,8 +1,8 @@
 {
  "source": {
   "project": "ccusage",
-  "commit": "660e07c9e7993dbdd70ed82699da195b39216955",
-  "committedAt": "2026-11-13T12:04:40Z",
+  "commit": "83d3f209a86e8b6f1e86eaf93f10568a262fd4e4",
+  "committedAt": "2026-11-14T03:22:33Z",
   "license": "MIT"
  },
  "models": {
@@ -361,7 +361,7 @@
    "cacheRead": 0.03,
    "cacheWrite": 0.375
   },
-  "deepseek-v4.1-flash-1017-basic": {
+  "deepseek-v4.1-flash-1017-economy": {
    "input": 0.2,
    "output": 0.6,
    "cacheRead": 0.01,
